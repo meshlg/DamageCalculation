@@ -146,6 +146,18 @@ function DC.settings:Initialize()
         DC.dpsModes.AVERAGE,
     }
 
+    local graphModeChoices = {
+        DC:GetString("graphModeTrend"),
+        DC:GetString("graphModeBurst"),
+        DC:GetString("graphModeRolling"),
+    }
+
+    local graphModeValues = {
+        DC.graphModes.TREND,
+        DC.graphModes.BURST,
+        DC.graphModes.ROLLING,
+    }
+
     local soundChoiceLabels = DC.sound:GetChoiceLabels()
     local soundChoiceValues = DC.sound:GetChoiceValues()
 
@@ -238,6 +250,26 @@ function DC.settings:Initialize()
                 DC:RefreshAll()
             end,
             default = defaults.dpsGraphAutoShowInCombat,
+            width = "full",
+        },
+        {
+            type = "dropdown",
+            name = function()
+                return DC:GetString("menuDpsGraphModeName")
+            end,
+            tooltip = function()
+                return DC:GetString("menuDpsGraphModeTooltip")
+            end,
+            choices = graphModeChoices,
+            choicesValues = graphModeValues,
+            getFunc = function()
+                return DC.storage:GetSettings().dpsGraphMode
+            end,
+            setFunc = function(value)
+                DC.storage:SetSetting("dpsGraphMode", value)
+                DC:RefreshAll()
+            end,
+            default = defaults.dpsGraphMode,
             width = "full",
         },
         {

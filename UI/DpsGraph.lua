@@ -25,6 +25,10 @@ function DC.dpsGraph:GetMiniGap()
     return self.miniGap
 end
 
+function DC.dpsGraph:ClampColor(value)
+    return math.max(0, math.min(1, tonumber(value) or 0))
+end
+
 function DC.dpsGraph:GetWindowWidth()
     if DC.hud and DC.hud.GetHudWidth then
         return math.max(360, math.floor(DC.hud:GetHudWidth() * 1.12))
@@ -49,6 +53,20 @@ function DC.dpsGraph:GetSelectedDisplayMode()
     return DC.storage:GetDisplayMode()
 end
 
+function DC.dpsGraph:GetSelectedGraphMode()
+    local configuredMode = self:GetSettings().dpsGraphMode
+
+    if configuredMode == DC.graphModes.BURST then
+        return DC.graphModes.BURST
+    end
+
+    if configuredMode == DC.graphModes.ROLLING then
+        return DC.graphModes.ROLLING
+    end
+
+    return DC.graphModes.TREND
+end
+
 function DC.dpsGraph:GetDisplayModeLabel(mode)
     if mode == DC.displayModes.SESSION then
         return DC:GetString("displayModeSession")
@@ -57,18 +75,48 @@ function DC.dpsGraph:GetDisplayModeLabel(mode)
     return DC:GetString("displayModeTotal")
 end
 
-function DC.dpsGraph:CreateBars(parent, barCount)
-    local bars = {}
-
-    for index = 1, math.max(1, math.floor(tonumber(barCount) or 1)) do
-        local bar = WINDOW_MANAGER:CreateControl(nil, parent, CT_BACKDROP)
-        bar:SetMouseEnabled(false)
-        bar:SetEdgeColor(0, 0, 0, 0)
-        bar:SetCenterColor(1, 1, 1, 0.2)
-        bars[index] = bar
+function DC.dpsGraph:GetGraphModeLabel(mode)
+    if mode == DC.graphModes.BURST then
+        return DC:GetString("graphModeBurst")
     end
 
-    return bars
+    if mode == DC.graphModes.ROLLING then
+        return DC:GetString("graphModeRolling")
+    end
+
+    return DC:GetString("graphModeTrend")
+end
+
+function DC.dpsGraph:CreateColumns(parent, barCount, includeSecondary)
+    local columns = {}
+
+    for index = 1, math.max(1, math.floor(tonumber(barCount) or 1)) do
+        local column = {}
+
+        column.fill = WINDOW_MANAGER:CreateControl(nil, parent, CT_BACKDROP)
+        column.fill:SetMouseEnabled(false)
+        column.fill:SetEdgeColor(0, 0, 0, 0)
+        column.fill:SetCenterColor(1, 1, 1, 0.22)
+        column.fill:SetHidden(true)
+
+        column.primaryCap = WINDOW_MANAGER:CreateControl(nil, parent, CT_BACKDROP)
+        column.primaryCap:SetMouseEnabled(false)
+        column.primaryCap:SetEdgeColor(0, 0, 0, 0)
+        column.primaryCap:SetCenterColor(1, 1, 1, 0.75)
+        column.primaryCap:SetHidden(true)
+
+        if includeSecondary then
+            column.secondaryMarker = WINDOW_MANAGER:CreateControl(nil, parent, CT_BACKDROP)
+            column.secondaryMarker:SetMouseEnabled(false)
+            column.secondaryMarker:SetEdgeColor(0, 0, 0, 0)
+            column.secondaryMarker:SetCenterColor(1, 1, 1, 0.85)
+            column.secondaryMarker:SetHidden(true)
+        end
+
+        columns[index] = column
+    end
+
+    return columns
 end
 
 function DC.dpsGraph:AttachMiniSparkline(row)
@@ -82,7 +130,7 @@ function DC.dpsGraph:AttachMiniSparkline(row)
     row.sparkline.backdrop:SetAnchorFill(row.sparkline)
     row.sparkline.backdrop:SetCenterColor(0.04, 0.04, 0.04, 0.12)
     row.sparkline.backdrop:SetEdgeColor(0, 0, 0, 0)
-    row.sparkline.bars = self:CreateBars(row.sparkline, self.miniBarCount)
+    row.sparkline.columns = self:CreateColumns(row.sparkline, self.miniBarCount, true)
 end
 
 function DC.dpsGraph:CreateControl()
@@ -130,7 +178,18 @@ function DC.dpsGraph:CreateControl()
     control.graphCanvas.midline:SetCenterColor(1, 1, 1, 0.07)
     control.graphCanvas.midline:SetEdgeColor(0, 0, 0, 0)
 
-    control.graphBars = self:CreateBars(control.graphCanvas, self.largeBarCount)
+    control.graphColumns = self:CreateColumns(control.graphCanvas, self.largeBarCount, true)
+
+    control.graphCanvas.peakMarker = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_BACKDROP)
+    control.graphCanvas.peakMarker:SetMouseEnabled(false)
+    control.graphCanvas.peakMarker:SetEdgeColor(0, 0, 0, 0)
+    control.graphCanvas.peakMarker:SetCenterColor(1.0, 0.95, 0.65, 0.95)
+    control.graphCanvas.peakMarker:SetHidden(true)
+
+    control.graphCanvas.peakLabel = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_LABEL)
+    control.graphCanvas.peakLabel:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
+    control.graphCanvas.peakLabel:SetVerticalAlignment(TEXT_ALIGN_CENTER)
+    control.graphCanvas.peakLabel:SetHidden(true)
 
     control.footerLabel = WINDOW_MANAGER:CreateControl(nil, control, CT_LABEL)
     control.footerLabel:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
@@ -169,86 +228,236 @@ function DC.dpsGraph:GetPlacement()
     return side, finalWidth, gap
 end
 
-function DC.dpsGraph:GetPrimaryValuesFromSample(sample, dpsMode)
-    if sample == nil or not DC.dps or not DC.dps.SelectSnapshotDps then
-        return 0, nil, nil, "hudDpsAverageShort"
+function DC.dpsGraph:GetTrendValuesFromSample(sample)
+    if sample == nil then
+        return 0, 0, "hudDpsActiveShort", "hudDpsAverageShort"
     end
 
-    return DC.dps:SelectSnapshotDps(sample, dpsMode)
+    local dpsMode = DC.dps and DC.dps.GetSelectedDpsMode and DC.dps:GetSelectedDpsMode() or DC.dpsModes.COMPATIBLE
+
+    if dpsMode == DC.dpsModes.AVERAGE then
+        return sample.averagePlayerDps or 0, sample.activePlayerDps or 0, "hudDpsAverageShort", "hudDpsActiveShort"
+    end
+
+    return sample.activePlayerDps or 0, sample.averagePlayerDps or 0, "hudDpsActiveShort", "hudDpsAverageShort"
+end
+
+function DC.dpsGraph:CalculatePointDps(damageDelta, timeDeltaMs)
+    local safeDamageDelta = math.max(0, math.floor(tonumber(damageDelta) or 0))
+    local safeTimeDeltaMs = math.max(0, math.floor(tonumber(timeDeltaMs) or 0))
+
+    if safeDamageDelta <= 0 or safeTimeDeltaMs <= 0 then
+        return 0
+    end
+
+    return math.max(0, math.floor(safeDamageDelta / (safeTimeDeltaMs / 1000)))
+end
+
+function DC.dpsGraph:CalculateRollingFiveSecondValue(samples, sampleIndex)
+    local sample = samples[sampleIndex]
+
+    if sample == nil then
+        return 0
+    end
+
+    local currentTimestamp = math.max(0, math.floor(tonumber(sample.timestamp) or 0))
+    local currentDamage = math.max(0, math.floor(tonumber(sample.playerDamage) or 0))
+    local windowStart = currentTimestamp - 5000
+    local anchorIndex = sampleIndex
+
+    while anchorIndex > 1 and (tonumber(samples[anchorIndex - 1].timestamp) or 0) >= windowStart do
+        anchorIndex = anchorIndex - 1
+    end
+
+    local anchorSample = samples[anchorIndex]
+    local anchorTimestamp = math.max(0, math.floor(tonumber(anchorSample and anchorSample.timestamp) or currentTimestamp))
+    local anchorDamage = math.max(0, math.floor(tonumber(anchorSample and anchorSample.playerDamage) or currentDamage))
+
+    return self:CalculatePointDps(currentDamage - anchorDamage, currentTimestamp - anchorTimestamp)
+end
+
+function DC.dpsGraph:BuildRawSeries(mode)
+    local samples = DC.dps and DC.dps.GetGraphSamples and DC.dps:GetGraphSamples(mode) or {}
+    local graphMode = self:GetSelectedGraphMode()
+    local rawSeries = {}
+    local meta = {
+        graphMode = graphMode,
+        primaryLabel = self:GetGraphModeLabel(graphMode),
+        secondaryLabel = "",
+        secondaryLabelKey = "",
+    }
+
+    for sampleIndex, sample in ipairs(samples) do
+        local trendPrimary, trendSecondary, trendPrimaryKey, trendSecondaryKey = self:GetTrendValuesFromSample(sample)
+        local primaryValue = trendPrimary
+        local secondaryValue = trendSecondary
+
+        if graphMode == DC.graphModes.BURST then
+            local previousSample = samples[sampleIndex - 1]
+            local damageDelta = (sample.playerDamage or 0) - (previousSample and previousSample.playerDamage or sample.playerDamage or 0)
+            local timeDeltaMs = (sample.timestamp or 0) - (previousSample and previousSample.timestamp or sample.timestamp or 0)
+
+            primaryValue = self:CalculatePointDps(damageDelta, timeDeltaMs)
+            secondaryValue = trendSecondary
+            meta.secondaryLabel = DC:GetString(trendSecondaryKey)
+            meta.secondaryLabelKey = trendSecondaryKey
+        elseif graphMode == DC.graphModes.ROLLING then
+            primaryValue = self:CalculateRollingFiveSecondValue(samples, sampleIndex)
+            secondaryValue = trendSecondary
+            meta.secondaryLabel = DC:GetString(trendSecondaryKey)
+            meta.secondaryLabelKey = trendSecondaryKey
+        else
+            primaryValue = trendPrimary
+            secondaryValue = trendSecondary
+            meta.primaryLabel = DC:GetString(trendPrimaryKey)
+            meta.secondaryLabel = DC:GetString(trendSecondaryKey)
+            meta.secondaryLabelKey = trendSecondaryKey
+        end
+
+        table.insert(rawSeries, {
+            timestamp = math.max(0, math.floor(tonumber(sample.timestamp) or 0)),
+            primaryValue = math.max(0, math.floor(tonumber(primaryValue) or 0)),
+            secondaryValue = math.max(0, math.floor(tonumber(secondaryValue) or 0)),
+        })
+    end
+
+    if graphMode ~= DC.graphModes.TREND and meta.secondaryLabel == "" then
+        meta.secondaryLabel = DC:GetString("hudDpsAverageShort")
+        meta.secondaryLabelKey = "hudDpsAverageShort"
+    end
+
+    return rawSeries, meta
 end
 
 function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
-    local samples = DC.dps and DC.dps.GetGraphSamples and DC.dps:GetGraphSamples(mode) or {}
-    local dpsMode = DC.dps and DC.dps.GetSelectedDpsMode and DC.dps:GetSelectedDpsMode() or DC.dpsModes.COMPATIBLE
-    local sampleCount = #samples
-    local barCount = math.max(1, math.floor(tonumber(targetCount) or 1))
+    local rawSeries, meta = self:BuildRawSeries(mode)
+    local pointCount = #rawSeries
+    local bucketCount = math.max(1, math.floor(tonumber(targetCount) or 1))
     local buckets = {}
-    local minValue = nil
-    local maxValue = 0
+    local primaryMin = nil
+    local primaryMax = 0
+    local secondaryMin = nil
+    local secondaryMax = 0
+    local peakIndex = 1
     local lastValue = 0
+    local previousValue = 0
+    local lastSecondaryValue = 0
 
-    if sampleCount <= 0 then
-        return buckets, 0, 0, sampleCount, lastValue
-    end
-
-    if sampleCount <= barCount then
-        for index = 1, sampleCount do
-            local playerDps = self:GetPrimaryValuesFromSample(samples[index], dpsMode)
-            local safeValue = math.max(0, math.floor(tonumber(playerDps) or 0))
-
-            buckets[index] = {
-                minValue = safeValue,
-                maxValue = safeValue,
-                lastValue = safeValue,
-            }
-
-            if minValue == nil or safeValue < minValue then
-                minValue = safeValue
-            end
-
-            maxValue = math.max(maxValue, safeValue)
-            lastValue = safeValue
-        end
-
-        return buckets, minValue or 0, maxValue, sampleCount, lastValue
-    end
-
-    local bucketSize = sampleCount / barCount
-
-    for bucketIndex = 1, barCount do
-        local startIndex = math.floor((bucketIndex - 1) * bucketSize) + 1
-        local endIndex = math.min(sampleCount, math.max(startIndex, math.floor(bucketIndex * bucketSize)))
-        local bucketMin = nil
-        local bucketMax = 0
-        local bucketLast = 0
-
-        for sampleIndex = startIndex, endIndex do
-            local playerDps = self:GetPrimaryValuesFromSample(samples[sampleIndex], dpsMode)
-            local safeValue = math.max(0, math.floor(tonumber(playerDps) or 0))
-
-            if bucketMin == nil or safeValue < bucketMin then
-                bucketMin = safeValue
-            end
-
-            bucketMax = math.max(bucketMax, safeValue)
-            bucketLast = safeValue
-        end
-
-        buckets[bucketIndex] = {
-            minValue = bucketMin or 0,
-            maxValue = bucketMax,
-            lastValue = bucketLast,
+    if pointCount <= 0 then
+        return {
+            buckets = buckets,
+            meta = meta,
+            pointCount = 0,
+            primaryMin = 0,
+            primaryMax = 0,
+            secondaryMin = 0,
+            secondaryMax = 0,
+            lowValue = 0,
+            peakValue = 0,
+            peakIndex = 1,
+            lastValue = 0,
+            previousValue = 0,
+            lastSecondaryValue = 0,
         }
-
-        if minValue == nil or (bucketMin ~= nil and bucketMin < minValue) then
-            minValue = bucketMin
-        end
-
-        maxValue = math.max(maxValue, bucketMax)
-        lastValue = bucketLast
     end
 
-    return buckets, minValue or 0, maxValue, sampleCount, lastValue
+    local function absorbPoint(point)
+        if point == nil then
+            return
+        end
+
+        local pointPrimary = math.max(0, math.floor(tonumber(point.primaryValue) or 0))
+        local pointSecondary = math.max(0, math.floor(tonumber(point.secondaryValue) or 0))
+
+        if primaryMin == nil or pointPrimary < primaryMin then
+            primaryMin = pointPrimary
+        end
+
+        if secondaryMin == nil or pointSecondary < secondaryMin then
+            secondaryMin = pointSecondary
+        end
+
+        primaryMax = math.max(primaryMax, pointPrimary)
+        secondaryMax = math.max(secondaryMax, pointSecondary)
+    end
+
+    for pointIndex, point in ipairs(rawSeries) do
+        absorbPoint(point)
+
+        if (point.primaryValue or 0) >= primaryMax then
+            peakIndex = pointIndex
+        end
+    end
+
+    lastValue = rawSeries[pointCount].primaryValue or 0
+    lastSecondaryValue = rawSeries[pointCount].secondaryValue or 0
+    previousValue = pointCount > 1 and (rawSeries[pointCount - 1].primaryValue or lastValue) or lastValue
+
+    if pointCount <= bucketCount then
+        for pointIndex, point in ipairs(rawSeries) do
+            buckets[pointIndex] = {
+                primaryMin = point.primaryValue or 0,
+                primaryMax = point.primaryValue or 0,
+                primaryLast = point.primaryValue or 0,
+                secondaryLast = point.secondaryValue or 0,
+            }
+        end
+    else
+        local bucketSize = pointCount / bucketCount
+
+        for bucketIndex = 1, bucketCount do
+            local startIndex = math.floor((bucketIndex - 1) * bucketSize) + 1
+            local endIndex = math.min(pointCount, math.max(startIndex, math.floor(bucketIndex * bucketSize)))
+            local bucketPrimaryMin = nil
+            local bucketPrimaryMax = 0
+            local bucketPrimaryLast = 0
+            local bucketSecondaryLast = 0
+
+            for pointIndex = startIndex, endIndex do
+                local point = rawSeries[pointIndex]
+                local pointPrimary = math.max(0, math.floor(tonumber(point and point.primaryValue) or 0))
+                local pointSecondary = math.max(0, math.floor(tonumber(point and point.secondaryValue) or 0))
+
+                if bucketPrimaryMin == nil or pointPrimary < bucketPrimaryMin then
+                    bucketPrimaryMin = pointPrimary
+                end
+
+                bucketPrimaryMax = math.max(bucketPrimaryMax, pointPrimary)
+                bucketPrimaryLast = pointPrimary
+                bucketSecondaryLast = pointSecondary
+            end
+
+            buckets[bucketIndex] = {
+                primaryMin = bucketPrimaryMin or 0,
+                primaryMax = bucketPrimaryMax,
+                primaryLast = bucketPrimaryLast,
+                secondaryLast = bucketSecondaryLast,
+            }
+        end
+
+        if pointCount > 1 then
+            local scaledPeakIndex = math.ceil((peakIndex / pointCount) * #buckets)
+            peakIndex = math.max(1, math.min(#buckets, scaledPeakIndex))
+        else
+            peakIndex = 1
+        end
+    end
+
+    return {
+        buckets = buckets,
+        meta = meta,
+        pointCount = pointCount,
+        primaryMin = primaryMin or 0,
+        primaryMax = primaryMax,
+        secondaryMin = secondaryMin or 0,
+        secondaryMax = secondaryMax,
+        lowValue = primaryMin or 0,
+        peakValue = primaryMax,
+        peakIndex = peakIndex,
+        lastValue = lastValue,
+        previousValue = previousValue,
+        lastSecondaryValue = lastSecondaryValue,
+    }
 end
 
 function DC.dpsGraph:GetVisualRange(minValue, maxValue)
@@ -266,34 +475,6 @@ function DC.dpsGraph:GetVisualRange(minValue, maxValue)
     local visualMax = math.max(visualMin + 1, math.floor(midpoint + halfRange))
 
     return visualMin, visualMax
-end
-
-function DC.dpsGraph:ComputeSeriesStats(mode)
-    local buckets, minValue, maxValue, sampleCount, lastValue = self:BuildCompressedBuckets(mode, self.largeBarCount)
-    local peakValue = 0
-    local lowValue = nil
-    local previousValue = nil
-
-    for _, bucket in ipairs(buckets) do
-        peakValue = math.max(peakValue, math.max(0, math.floor(tonumber(bucket.maxValue) or 0)))
-
-        local bucketLow = math.max(0, math.floor(tonumber(bucket.minValue) or 0))
-        if lowValue == nil or bucketLow < lowValue then
-            lowValue = bucketLow
-        end
-
-        previousValue = bucket.lastValue or previousValue
-    end
-
-    return {
-        minValue = minValue,
-        maxValue = maxValue,
-        peakValue = peakValue,
-        lowValue = lowValue or 0,
-        sampleCount = sampleCount,
-        lastValue = lastValue or 0,
-        previousValue = previousValue or 0,
-    }
 end
 
 function DC.dpsGraph:UpdateReferenceLine(container, minValue, maxValue, referenceValue)
@@ -314,12 +495,46 @@ function DC.dpsGraph:UpdateReferenceLine(container, minValue, maxValue, referenc
     container.midline:SetHeight(1)
 end
 
-function DC.dpsGraph:DrawBars(container, bars, buckets, minValue, maxValue)
-    if container == nil or bars == nil then
+function DC.dpsGraph:UpdatePeakMarker(container, dataset, width, height, visualMin, visualMax)
+    if container == nil or container.peakMarker == nil or container.peakLabel == nil then
         return
     end
 
-    local totalBars = #bars
+    local buckets = dataset and dataset.buckets or nil
+
+    if buckets == nil or #buckets <= 0 then
+        container.peakMarker:SetHidden(true)
+        container.peakLabel:SetHidden(true)
+        return
+    end
+
+    local peakIndex = math.max(1, math.min(#buckets, math.floor(tonumber(dataset.peakIndex) or 1)))
+    local peakValue = math.max(0, math.floor(tonumber(dataset.peakValue) or 0))
+    local range = math.max(1, visualMax - visualMin)
+    local normalizedPeak = (math.max(visualMin, math.min(visualMax, peakValue)) - visualMin) / range
+    local xWidth = width / math.max(1, #buckets)
+    local leftOffset = math.floor((peakIndex - 1) * xWidth)
+    local rightOffset = math.floor(peakIndex * xWidth)
+    local centerOffset = leftOffset + math.max(1, math.floor((rightOffset - leftOffset) * 0.5))
+    local bottomOffset = math.max(0, math.min(height - 1, math.floor((height - 2) * normalizedPeak + 0.5)))
+
+    container.peakMarker:ClearAnchors()
+    container.peakMarker:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, centerOffset - 3, -bottomOffset - 3)
+    container.peakMarker:SetDimensions(6, 6)
+    container.peakMarker:SetHidden(false)
+
+    container.peakLabel:ClearAnchors()
+    container.peakLabel:SetAnchor(BOTTOMLEFT, container.peakMarker, TOPLEFT, -10, -2)
+    container.peakLabel:SetText(DC.formatter:FormatFull(peakValue))
+    container.peakLabel:SetHidden(false)
+end
+
+function DC.dpsGraph:DrawBars(container, columns, dataset)
+    if container == nil or columns == nil or dataset == nil then
+        return
+    end
+
+    local totalColumns = #columns
     local width = math.max(1, math.floor(container:GetWidth() or 1))
     local height = math.max(1, math.floor(container:GetHeight() or 1))
     local labelColorR, labelColorG, labelColorB = 1, 1, 1
@@ -333,47 +548,95 @@ function DC.dpsGraph:DrawBars(container, bars, buckets, minValue, maxValue)
         valueColorR, valueColorG, valueColorB = DC.hud:GetValueColor()
     end
 
-    local activeCount = math.min(#buckets, totalBars)
+    local buckets = dataset.buckets or {}
+    local activeCount = math.min(#buckets, totalColumns)
     local visibleCount = math.max(1, activeCount)
     local barWidth = width / visibleCount
-    local visualMin, visualMax = self:GetVisualRange(minValue, maxValue)
+    local combinedMin = math.min(dataset.primaryMin or 0, dataset.secondaryMin or 0)
+    local combinedMax = math.max(dataset.primaryMax or 0, dataset.secondaryMax or 0)
+    local visualMin, visualMax = self:GetVisualRange(combinedMin, combinedMax)
     local valueRange = math.max(1, visualMax - visualMin)
+    local previousPrimaryValue = nil
 
-    for barIndex = 1, totalBars do
-        local bar = bars[barIndex]
+    self:UpdateReferenceLine(container, combinedMin, combinedMax, dataset.lastValue or 0)
 
-        bar:ClearAnchors()
+    for barIndex = 1, totalColumns do
+        local column = columns[barIndex]
 
         if barIndex <= activeCount then
             local bucket = buckets[barIndex]
-            local bucketMin = math.max(0, math.floor(tonumber(bucket and bucket.minValue) or 0))
-            local bucketMax = math.max(bucketMin, math.floor(tonumber(bucket and bucket.maxValue) or 0))
-            local bucketLast = math.max(bucketMin, math.floor(tonumber(bucket and bucket.lastValue) or 0))
-            local normalizedMin = (math.max(visualMin, math.min(visualMax, bucketMin)) - visualMin) / valueRange
-            local normalizedMax = (math.max(visualMin, math.min(visualMax, bucketMax)) - visualMin) / valueRange
-            local normalizedLast = (math.max(visualMin, math.min(visualMax, bucketLast)) - visualMin) / valueRange
-            local bottomOffset = math.max(0, math.floor((height - 2) * normalizedMin))
-            local topOffset = math.max(bottomOffset + 2, math.floor((height - 2) * normalizedMax))
-            local barHeight = math.max(2, topOffset - bottomOffset)
+            local primaryLast = math.max(0, math.floor(tonumber(bucket and bucket.primaryLast) or 0))
+            local primaryMax = math.max(primaryLast, math.floor(tonumber(bucket and bucket.primaryMax) or 0))
+            local primaryMin = math.max(0, math.floor(tonumber(bucket and bucket.primaryMin) or 0))
+            local secondaryLast = math.max(0, math.floor(tonumber(bucket and bucket.secondaryLast) or 0))
+            local normalizedPrimary = (math.max(visualMin, math.min(visualMax, primaryLast)) - visualMin) / valueRange
+            local normalizedSecondary = (math.max(visualMin, math.min(visualMax, secondaryLast)) - visualMin) / valueRange
+            local burstFactor = (math.max(visualMin, math.min(visualMax, primaryMax)) - math.max(visualMin, math.min(visualMax, primaryMin))) / valueRange
+            local fillHeight = math.max(2, math.floor((height - 2) * normalizedPrimary))
+            local secondaryOffset = math.max(0, math.floor((height - 2) * normalizedSecondary))
             local ageT = activeCount > 1 and ((barIndex - 1) / (activeCount - 1)) or 1
-            local lastBias = math.max(0.15, normalizedLast)
-            local alpha = 0.20 + (ageT * 0.62)
-            local mix = math.max(0.30, math.min(1.0, (0.35 + (ageT * 0.45)) + (lastBias * 0.2)))
-            local red = (labelColorR * (1 - mix)) + (valueColorR * mix)
-            local green = (labelColorG * (1 - mix)) + (valueColorG * mix)
-            local blue = (labelColorB * (1 - mix)) + (valueColorB * mix)
+            local directionDelta = previousPrimaryValue == nil and 0 or (primaryLast - previousPrimaryValue)
+            local directionTint = 0
+
+            if directionDelta > 0 then
+                directionTint = math.min(1.0, math.abs(directionDelta) / math.max(1, primaryLast))
+            elseif directionDelta < 0 then
+                directionTint = -math.min(1.0, math.abs(directionDelta) / math.max(1, math.max(previousPrimaryValue or 1, primaryLast)))
+            end
+
+            local alpha = 0.24 + (ageT * 0.44) + math.min(0.12, burstFactor * 0.16)
             local leftOffset = math.floor((barIndex - 1) * barWidth)
             local rightOffset = math.floor(barIndex * barWidth)
-            local finalWidth = math.max(1, rightOffset - leftOffset - 1)
+            local finalWidth = math.max(1, rightOffset - leftOffset)
+            local fillRed = valueColorR
+            local fillGreen = valueColorG
+            local fillBlue = valueColorB
+            local capRed = math.min(1.0, valueColorR + 0.10)
+            local capGreen = math.min(1.0, valueColorG + 0.10)
+            local capBlue = math.min(1.0, valueColorB + 0.10)
 
-            bar:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -bottomOffset)
-            bar:SetDimensions(finalWidth, barHeight)
-            bar:SetCenterColor(red, green, blue, alpha)
-            bar:SetHidden(false)
+            if directionTint > 0 then
+                fillRed = self:ClampColor(fillRed * (1 - (directionTint * 0.18)) + (0.22 * directionTint))
+                fillGreen = self:ClampColor(fillGreen * (1 - (directionTint * 0.18)) + (1.00 * directionTint * 0.18))
+                fillBlue = self:ClampColor(fillBlue * (1 - (directionTint * 0.18)) + (0.42 * directionTint * 0.18))
+            elseif directionTint < 0 then
+                local dropTint = math.abs(directionTint)
+                fillRed = self:ClampColor(fillRed * (1 - (dropTint * 0.18)) + (1.00 * dropTint * 0.18))
+                fillGreen = self:ClampColor(fillGreen * (1 - (dropTint * 0.18)) + (0.28 * dropTint * 0.18))
+                fillBlue = self:ClampColor(fillBlue * (1 - (dropTint * 0.18)) + (0.26 * dropTint * 0.18))
+            end
+
+            column.fill:ClearAnchors()
+            column.fill:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, 0)
+            column.fill:SetDimensions(finalWidth, fillHeight)
+            column.fill:SetCenterColor(fillRed, fillGreen, fillBlue, alpha)
+            column.fill:SetHidden(false)
+
+            column.primaryCap:ClearAnchors()
+            column.primaryCap:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -math.max(0, fillHeight - 2))
+            column.primaryCap:SetDimensions(finalWidth, 2)
+            column.primaryCap:SetCenterColor(capRed, capGreen, capBlue, 0.96)
+            column.primaryCap:SetHidden(false)
+
+            if column.secondaryMarker ~= nil then
+                column.secondaryMarker:ClearAnchors()
+                column.secondaryMarker:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -secondaryOffset)
+                column.secondaryMarker:SetDimensions(finalWidth, 2)
+                column.secondaryMarker:SetCenterColor(labelColorR, labelColorG, labelColorB, 0.85)
+                column.secondaryMarker:SetHidden(false)
+            end
+
+            previousPrimaryValue = primaryLast
         else
-            bar:SetHidden(true)
+            column.fill:SetHidden(true)
+            column.primaryCap:SetHidden(true)
+            if column.secondaryMarker ~= nil then
+                column.secondaryMarker:SetHidden(true)
+            end
         end
     end
+
+    self:UpdatePeakMarker(container, dataset, width, height, visualMin, visualMax)
 end
 
 function DC.dpsGraph:RefreshMiniSparkline(now)
@@ -393,8 +656,8 @@ function DC.dpsGraph:RefreshMiniSparkline(now)
         return
     end
 
-    local buckets, minValue, maxValue = self:BuildCompressedBuckets(self:GetSelectedDisplayMode(), self.miniBarCount)
-    self:DrawBars(row.sparkline, row.sparkline.bars, buckets, minValue, maxValue)
+    local dataset = self:BuildCompressedBuckets(self:GetSelectedDisplayMode(), self.miniBarCount)
+    self:DrawBars(row.sparkline, row.sparkline.columns, dataset)
     self.lastMiniRefreshAt = currentNow
 end
 
@@ -410,6 +673,7 @@ function DC.dpsGraph:ApplyFonts()
     self.control.summaryPrimaryLabel:SetFont(DC.hud:BuildFont(settings.valueFontFace, math.max(12, settings.tooltipFontSize or 15)))
     self.control.summarySecondaryLabel:SetFont(DC.hud:BuildFont(settings.valueFontFace, math.max(11, (settings.tooltipFontSize or 15) - 1)))
     self.control.footerLabel:SetFont(DC.hud:BuildFont(settings.labelFontFace, math.max(11, (settings.tooltipFontSize or 15) - 2)))
+    self.control.graphCanvas.peakLabel:SetFont(DC.hud:BuildFont(settings.labelFontFace, math.max(11, (settings.tooltipFontSize or 15) - 2)))
 end
 
 function DC.dpsGraph:ApplyColors()
@@ -434,6 +698,7 @@ function DC.dpsGraph:ApplyColors()
     self.control.summarySecondaryLabel:SetColor(labelColorR, labelColorG, labelColorB, labelColorA)
     self.control.footerLabel:SetColor(labelColorR, labelColorG, labelColorB, labelColorA)
     self.control.graphCanvas.midline:SetCenterColor(labelColorR, labelColorG, labelColorB, 0.10)
+    self.control.graphCanvas.peakLabel:SetColor(labelColorR, labelColorG, labelColorB, labelColorA)
 end
 
 function DC.dpsGraph:ApplyLayout()
@@ -494,22 +759,39 @@ function DC.dpsGraph:UpdateWindowText(now)
 
     local mode = self:GetSelectedDisplayMode()
     local snapshot = DC.dps:BuildDisplaySnapshot(mode, now)
-    local playerText = DC.formatter:FormatFull(snapshot.playerDps or 0)
-    local secondaryText = snapshot.secondaryPlayerDps ~= nil and DC.formatter:FormatFull(snapshot.secondaryPlayerDps) or nil
+    local dataset = self:BuildCompressedBuckets(mode, self.largeBarCount)
+    local playerText = DC.formatter:FormatFull(dataset.lastValue or 0)
+    local secondaryText = DC.formatter:FormatFull(dataset.lastSecondaryValue or 0)
     local combatTimeText = DC.hud and DC.hud.FormatCombatTime and DC.hud:FormatCombatTime(snapshot.combatDurationMs or 0) or "00:00.000"
     local primaryParts = {
-        string.format("%s: %s", DC:GetString("hudDpsLabel"), playerText),
+        string.format("%s: %s", tostring(dataset.meta and dataset.meta.primaryLabel or DC:GetString("hudDpsLabel")), playerText),
     }
     local secondaryParts = {}
-    local samples = DC.dps:GetGraphSamples(mode)
-    local seriesStats = self:ComputeSeriesStats(mode)
+    local deltaBaseValue = math.max(0, math.floor(tonumber(dataset.previousValue) or 0))
+    local deltaPercent = 0
+    local deltaPrefix = "+"
+
+    if deltaBaseValue > 0 then
+        deltaPercent = (((dataset.lastValue or 0) - deltaBaseValue) / deltaBaseValue) * 100
+    elseif (dataset.lastValue or 0) <= 0 then
+        deltaPrefix = ""
+    end
+
+    if deltaPercent < 0 then
+        deltaPrefix = ""
+    end
 
     self.control.titleLabel:SetText(DC:GetString("dpsGraphTitle"))
-    self.control.modeLabel:SetText(self:GetDisplayModeLabel(mode))
-
-    if secondaryText ~= nil then
-        table.insert(primaryParts, string.format("%s %s", DC:GetString(snapshot.secondaryLabelKey or "hudDpsAverageShort"), secondaryText))
-    end
+    self.control.modeLabel:SetText(string.format("%s | %s | %s: %s",
+        self:GetDisplayModeLabel(mode),
+        self:GetGraphModeLabel(self:GetSelectedGraphMode()),
+        DC:GetString("dpsGraphOverlayLabel"),
+        tostring(dataset.meta and dataset.meta.secondaryLabel or DC:GetString("hudDpsAverageShort"))
+    ))
+    table.insert(primaryParts, string.format("%s: %s",
+        tostring(dataset.meta and dataset.meta.secondaryLabel or DC:GetString("hudDpsAverageShort")),
+        secondaryText
+    ))
 
     if snapshot.groupDps ~= nil then
         table.insert(secondaryParts, string.format("%s: %s", DC:GetString("hudDpsGroupLabel"), DC.formatter:FormatFull(snapshot.groupDps)))
@@ -519,14 +801,15 @@ function DC.dpsGraph:UpdateWindowText(now)
         table.insert(secondaryParts, string.format("%s: %d%%", DC:GetString("dpsGraphShareLabel"), snapshot.sharePercent))
     end
 
-    table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphPeakLabel"), DC.formatter:FormatFull(seriesStats.peakValue or 0)))
-    table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphLowLabel"), DC.formatter:FormatFull(seriesStats.lowValue or 0)))
+    table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphPeakLabel"), DC.formatter:FormatFull(dataset.peakValue or 0)))
+    table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphLowLabel"), DC.formatter:FormatFull(dataset.lowValue or 0)))
+    table.insert(secondaryParts, string.format("%s: %s%.1f%%", DC:GetString("dpsGraphDeltaLabel"), deltaPrefix, deltaPercent))
 
     self.control.summaryPrimaryLabel:SetText(table.concat(primaryParts, " | "))
     self.control.summarySecondaryLabel:SetText(table.concat(secondaryParts, " | "))
     self.control.summarySecondaryLabel:SetHidden(#secondaryParts == 0)
 
-    if #samples <= 0 then
+    if (dataset.pointCount or 0) <= 0 then
         self.control.footerLabel:SetText(DC:GetString("dpsGraphNoData"))
         return
     end
@@ -534,10 +817,10 @@ function DC.dpsGraph:UpdateWindowText(now)
     self.control.footerLabel:SetText(string.format("%s: %s | %s | %s: %s-%s",
         DC:GetString("hudCombatTimeLabel"),
         combatTimeText,
-        DC:GetString("dpsGraphSamplesLabel", #samples),
+        DC:GetString("dpsGraphSamplesLabel", dataset.pointCount or 0),
         DC:GetString("dpsGraphRangeLabel"),
-        DC.formatter:FormatFull(seriesStats.lowValue or 0),
-        DC.formatter:FormatFull(seriesStats.peakValue or 0)
+        DC.formatter:FormatFull(dataset.lowValue or 0),
+        DC.formatter:FormatFull(dataset.peakValue or 0)
     ))
 end
 
@@ -547,9 +830,8 @@ function DC.dpsGraph:UpdateWindowGraph()
     end
 
     local mode = self:GetSelectedDisplayMode()
-    local buckets, minValue, maxValue, _, lastValue = self:BuildCompressedBuckets(mode, self.largeBarCount)
-    self:DrawBars(self.control.graphCanvas, self.control.graphBars, buckets, minValue, maxValue)
-    self:UpdateReferenceLine(self.control.graphCanvas, minValue, maxValue, lastValue)
+    local dataset = self:BuildCompressedBuckets(mode, self.largeBarCount)
+    self:DrawBars(self.control.graphCanvas, self.control.graphColumns, dataset)
 end
 
 function DC.dpsGraph:RefreshWindow(now)

@@ -37,6 +37,7 @@ DC.storage = {
             displayMode = DC.displayModes.TOTAL,
             dpsMode = DC.dpsModes.COMPATIBLE,
             dpsGraphAutoShowInCombat = true,
+            dpsGraphMode = DC.graphModes.TREND,
             language = DC.languageModes.AUTO,
             showDamageMetric = true,
             showBlockedMetric = true,

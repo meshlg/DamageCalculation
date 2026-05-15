@@ -197,6 +197,8 @@ function DC.dps:CaptureGraphSampleForMode(mode, now)
         averageGroupDps = snapshot.averageGroupDps,
         activeGroupDps = snapshot.activeGroupDps,
         sharePercent = snapshot.sharePercent,
+        playerDamage = snapshot.playerDamage or 0,
+        groupDamage = snapshot.groupDamage or 0,
         combatDurationMs = snapshot.combatDurationMs or 0,
     })
 

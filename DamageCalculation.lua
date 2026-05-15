@@ -30,6 +30,12 @@ DC.dpsModes = {
     AVERAGE = "average",
 }
 
+DC.graphModes = {
+    TREND = "trend",
+    BURST = "burst",
+    ROLLING = "rolling5s",
+}
+
 DC.fontFaces = {
     MEDIUM = "medium",
     BOLD = "bold",
