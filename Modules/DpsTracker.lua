@@ -10,6 +10,15 @@ DC.dps = {
     softFreezeWindowMs = 3500,
     hardCorrectionIntervalMs = 5000,
     activeGapThresholdMs = 1500,
+    directWindowMs = 250,
+    dotSupportWindowMs = 1000,
+    totalEmaWindowMs = 1000,
+    graphRuntimeRetentionMs = 8000,
+    dropThresholdRatio = 0.30,
+    dropMinimumDurationMs = 150,
+    swapDetectRecentDamageWindowMs = 2000,
+    swapRelevanceWindowMs = 650,
+    swapLatencyHistoryLimit = 24,
     trackedGroupUnitIds = {},
     trackedGroupSize = 1,
     liveSessionPlayerDamage = 0,
@@ -26,6 +35,8 @@ DC.dps = {
     displayStates = {},
     graphHistories = {},
     graphLastSampleAtMs = 0,
+    graphRuntime = nil,
+    swapTracking = false,
 }
 
 function DC.dps:GetSettings()
@@ -50,6 +61,10 @@ function DC.dps:IsDamageResult(result)
     end
 
     return false
+end
+
+function DC.dps:IsDotDamageResult(result)
+    return result == ACTION_RESULT_DOT_TICK or result == ACTION_RESULT_DOT_TICK_CRITICAL
 end
 
 function DC.dps:IsPersonalSource(sourceType)
@@ -157,6 +172,35 @@ function DC.dps:CreateEmptyGraphHistories()
     }
 end
 
+function DC.dps:CreateGraphRuntimeState()
+    return {
+        recentDirectHits = {},
+        recentDotHits = {},
+        recentSwapLatencies = {},
+        emaTotalDps = 0,
+        lastTelemetryAtMs = 0,
+        lastExportedAtMs = 0,
+        dropCandidateStartedAtMs = nil,
+        dropActive = false,
+        dropCause = nil,
+        pendingSwapStartedAtMs = nil,
+        lastSwapCompletedAtMs = 0,
+        lastDirectDamageAtMs = 0,
+        lastPersonalDamageAtMs = 0,
+        lastInstantDirectDps = 0,
+        lastInstantDotDps = 0,
+        lastTotalEmaDps = 0,
+    }
+end
+
+function DC.dps:EnsureGraphRuntimeState()
+    if self.graphRuntime == nil then
+        self.graphRuntime = self:CreateGraphRuntimeState()
+    end
+
+    return self.graphRuntime
+end
+
 function DC.dps:ResetGraphHistories()
     self.graphHistories = self:CreateEmptyGraphHistories()
     self.graphLastSampleAtMs = 0
@@ -194,7 +238,7 @@ function DC.dps:TrimAllGraphHistories()
     end
 end
 
-function DC.dps:CaptureGraphSampleForMode(mode, now)
+function DC.dps:CaptureGraphSampleForMode(mode, now, runtimeSnapshot)
     if self.graphHistories == nil or self.graphHistories[mode] == nil then
         self:ResetGraphHistories()
     end
@@ -204,6 +248,11 @@ function DC.dps:CaptureGraphSampleForMode(mode, now)
     local history = self.graphHistories[mode]
     local encounterDurationMs = DC.combatTracker and DC.combatTracker.GetCombatDurationMs and DC.combatTracker:GetCombatDurationMs(currentNow) or 0
     local encounterActiveCombatDurationMs = self:GetLiveSessionActiveDurationMs()
+    local runtime = runtimeSnapshot or self:GetRuntimeGraphSnapshot(currentNow)
+
+    if runtime == nil then
+        runtime = {}
+    end
 
     table.insert(history, {
         timestamp = currentNow,
@@ -219,6 +268,13 @@ function DC.dps:CaptureGraphSampleForMode(mode, now)
         encounterActiveCombatDurationMs = encounterActiveCombatDurationMs,
         encounterPlayerDamage = self.liveSessionPlayerDamage or 0,
         encounterGroupDamage = self.liveSessionGroupDamage or 0,
+        instantDirectDps = runtime.instantDirectDps or 0,
+        dotSupportDps = runtime.dotSupportDps or 0,
+        totalEmaDps = runtime.totalEmaDps or 0,
+        dropActive = runtime.dropActive == true,
+        dropCause = runtime.dropCause,
+        swapLatencyMs = runtime.swapLatencyMs,
+        swapFresh = runtime.swapFresh == true,
     })
 
     self:TrimGraphHistory(mode)
@@ -235,8 +291,11 @@ function DC.dps:UpdateGraphHistories(now, force)
         return
     end
 
-    self:CaptureGraphSampleForMode(DC.displayModes.TOTAL, currentNow)
-    self:CaptureGraphSampleForMode(DC.displayModes.SESSION, currentNow)
+    local runtimeSnapshot = self:GetRuntimeGraphSnapshot(currentNow)
+
+    self:CaptureGraphSampleForMode(DC.displayModes.TOTAL, currentNow, runtimeSnapshot)
+    self:CaptureGraphSampleForMode(DC.displayModes.SESSION, currentNow, runtimeSnapshot)
+    self:MarkRuntimeGraphSnapshotExported(currentNow)
     self.graphLastSampleAtMs = currentNow
 end
 
@@ -257,6 +316,7 @@ function DC.dps:ResetLiveSession()
     self.liveGroupAvailable = false
     self.lastDamageAtMs = 0
     self.lastDamageGapMs = 0
+    self.graphRuntime = self:CreateGraphRuntimeState()
     self:RefreshTrackedGroupUnits()
     self:ResetGraphHistories()
 
@@ -276,6 +336,261 @@ end
 
 function DC.dps:GetDamageContribution(hitValue)
     return math.max(0, math.floor(tonumber(hitValue) or 0))
+end
+
+function DC.dps:TrimRecentGraphEvents(events, cutoffAtMs)
+    if events == nil then
+        return
+    end
+
+    local trimCount = 0
+
+    for index = 1, #events do
+        local entry = events[index]
+
+        if entry == nil or math.max(0, math.floor(tonumber(entry.at) or 0)) >= cutoffAtMs then
+            break
+        end
+
+        trimCount = index
+    end
+
+    for _ = 1, trimCount do
+        table.remove(events, 1)
+    end
+end
+
+function DC.dps:PushGraphDamageEvent(events, eventAtMs, damageAmount)
+    if events == nil then
+        return
+    end
+
+    table.insert(events, {
+        at = math.max(0, math.floor(tonumber(eventAtMs) or 0)),
+        amount = math.max(0, math.floor(tonumber(damageAmount) or 0)),
+    })
+end
+
+function DC.dps:SumGraphDamageSince(events, cutoffAtMs)
+    if events == nil then
+        return 0
+    end
+
+    local totalDamage = 0
+
+    for index = #events, 1, -1 do
+        local entry = events[index]
+
+        if entry == nil then
+            break
+        end
+
+        if math.max(0, math.floor(tonumber(entry.at) or 0)) < cutoffAtMs then
+            break
+        end
+
+        totalDamage = totalDamage + math.max(0, math.floor(tonumber(entry.amount) or 0))
+    end
+
+    return totalDamage
+end
+
+function DC.dps:PushSwapLatencyEvent(runtime, eventAtMs, latencyMs)
+    if runtime == nil then
+        return
+    end
+
+    local recentSwapLatencies = runtime.recentSwapLatencies
+
+    if recentSwapLatencies == nil then
+        recentSwapLatencies = {}
+        runtime.recentSwapLatencies = recentSwapLatencies
+    end
+
+    table.insert(recentSwapLatencies, {
+        at = math.max(0, math.floor(tonumber(eventAtMs) or 0)),
+        latencyMs = math.max(0, math.floor(tonumber(latencyMs) or 0)),
+    })
+
+    local overflow = #recentSwapLatencies - self.swapLatencyHistoryLimit
+
+    for _ = 1, math.max(0, overflow) do
+        table.remove(recentSwapLatencies, 1)
+    end
+end
+
+function DC.dps:BeginPendingSwap(now)
+    if not self:IsEncounterLive() then
+        return
+    end
+
+    local currentNow = math.max(0, math.floor(tonumber(now) or 0))
+    local runtime = self:EnsureGraphRuntimeState()
+
+    if runtime == nil then
+        return
+    end
+
+    local lastPersonalDamageAtMs = math.max(0, math.floor(tonumber(runtime.lastPersonalDamageAtMs) or 0))
+
+    if lastPersonalDamageAtMs <= 0 or (currentNow - lastPersonalDamageAtMs) > self.swapDetectRecentDamageWindowMs then
+        return
+    end
+
+    runtime.pendingSwapStartedAtMs = currentNow
+end
+
+function DC.dps:ResolvePendingSwap(now)
+    local currentNow = math.max(0, math.floor(tonumber(now) or 0))
+    local runtime = self:EnsureGraphRuntimeState()
+
+    if runtime == nil then
+        return
+    end
+
+    local startedAtMs = runtime.pendingSwapStartedAtMs
+
+    if startedAtMs == nil then
+        return
+    end
+
+    local latencyMs = math.max(0, currentNow - math.max(0, math.floor(tonumber(startedAtMs) or 0)))
+
+    runtime.pendingSwapStartedAtMs = nil
+    runtime.lastSwapCompletedAtMs = currentNow
+    self:PushSwapLatencyEvent(runtime, currentNow, latencyMs)
+end
+
+function DC.dps:GetDropCause(runtime, now, instantDirectDps, dotSupportDps)
+    if runtime == nil then
+        return nil
+    end
+
+    local currentNow = math.max(0, math.floor(tonumber(now) or 0))
+    local pendingSwapStartedAtMs = runtime.pendingSwapStartedAtMs
+    local lastSwapCompletedAtMs = math.max(0, math.floor(tonumber(runtime.lastSwapCompletedAtMs) or 0))
+
+    if pendingSwapStartedAtMs ~= nil then
+        return "swap"
+    end
+
+    if lastSwapCompletedAtMs > 0 and (currentNow - lastSwapCompletedAtMs) <= self.swapRelevanceWindowMs then
+        return "swap"
+    end
+
+    if math.max(0, math.floor(tonumber(dotSupportDps) or 0)) > 0 and math.max(0, math.floor(tonumber(instantDirectDps) or 0)) <= 0 then
+        return "dots"
+    end
+
+    return "recovery"
+end
+
+function DC.dps:GetRuntimeGraphSnapshot(now)
+    local currentNow = math.max(0, math.floor(tonumber(now) or (GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0)))
+    local runtime = self:EnsureGraphRuntimeState()
+
+    if runtime == nil then
+        return {
+            instantDirectDps = 0,
+            dotSupportDps = 0,
+            totalEmaDps = 0,
+            dropActive = false,
+            dropCause = nil,
+            swapLatencyMs = nil,
+            swapFresh = false,
+        }
+    end
+
+    local retentionCutoffAtMs = currentNow - self.graphRuntimeRetentionMs
+    local directCutoffAtMs = currentNow - self.directWindowMs
+    local dotCutoffAtMs = currentNow - self.dotSupportWindowMs
+    local directDamage = 0
+    local dotInstantDamage = 0
+    local dotSupportDamage = 0
+    local instantDirectDps = 0
+    local instantTotalDps = 0
+    local dotSupportDps = 0
+    local totalEmaDps = 0
+    local dropActive = false
+    local dropCause = nil
+    local swapLatencyMs = nil
+    local recentDirectHits = runtime.recentDirectHits or {}
+    local recentDotHits = runtime.recentDotHits or {}
+    local recentSwapLatencies = runtime.recentSwapLatencies or {}
+
+    runtime.recentDirectHits = recentDirectHits
+    runtime.recentDotHits = recentDotHits
+    runtime.recentSwapLatencies = recentSwapLatencies
+
+    self:TrimRecentGraphEvents(recentDirectHits, retentionCutoffAtMs)
+    self:TrimRecentGraphEvents(recentDotHits, retentionCutoffAtMs)
+    self:TrimRecentGraphEvents(recentSwapLatencies, retentionCutoffAtMs)
+
+    directDamage = self:SumGraphDamageSince(recentDirectHits, directCutoffAtMs)
+    dotInstantDamage = self:SumGraphDamageSince(recentDotHits, directCutoffAtMs)
+    dotSupportDamage = self:SumGraphDamageSince(recentDotHits, dotCutoffAtMs)
+    instantDirectDps = self:CalculateDps(directDamage, self.directWindowMs, nil)
+    instantTotalDps = self:CalculateDps(directDamage + dotInstantDamage, self.directWindowMs, nil)
+    dotSupportDps = self:CalculateDps(dotSupportDamage, self.dotSupportWindowMs, nil)
+
+    if runtime.lastTelemetryAtMs <= 0 then
+        runtime.emaTotalDps = instantTotalDps
+    else
+        local elapsedMs = math.max(1, currentNow - runtime.lastTelemetryAtMs)
+        local alpha = math.max(0.15, math.min(1.0, elapsedMs / self.totalEmaWindowMs))
+        runtime.emaTotalDps = math.max(0, math.floor((runtime.emaTotalDps or 0) + ((instantTotalDps - (runtime.emaTotalDps or 0)) * alpha) + 0.5))
+    end
+
+    runtime.lastTelemetryAtMs = currentNow
+    runtime.lastInstantDirectDps = instantDirectDps
+    runtime.lastInstantDotDps = dotSupportDps
+    runtime.lastTotalEmaDps = runtime.emaTotalDps or 0
+    totalEmaDps = math.max(0, math.floor(tonumber(runtime.emaTotalDps) or 0))
+
+    if totalEmaDps > 0 and instantDirectDps < math.floor(totalEmaDps * self.dropThresholdRatio) then
+        if runtime.dropCandidateStartedAtMs == nil then
+            runtime.dropCandidateStartedAtMs = currentNow
+        end
+
+        if (currentNow - runtime.dropCandidateStartedAtMs) >= self.dropMinimumDurationMs then
+            dropActive = true
+            dropCause = self:GetDropCause(runtime, currentNow, instantDirectDps, dotSupportDps)
+        end
+    else
+        runtime.dropCandidateStartedAtMs = nil
+    end
+
+    runtime.dropActive = dropActive
+    runtime.dropCause = dropCause
+
+    for index = #recentSwapLatencies, 1, -1 do
+        local entry = recentSwapLatencies[index]
+
+        if entry ~= nil and math.max(0, math.floor(tonumber(entry.at) or 0)) > math.max(0, math.floor(tonumber(runtime.lastExportedAtMs) or 0)) then
+            swapLatencyMs = math.max(0, math.floor(tonumber(entry.latencyMs) or 0))
+            break
+        end
+    end
+
+    return {
+        instantDirectDps = instantDirectDps,
+        dotSupportDps = dotSupportDps,
+        totalEmaDps = totalEmaDps,
+        dropActive = dropActive,
+        dropCause = dropCause,
+        swapLatencyMs = swapLatencyMs,
+        swapFresh = swapLatencyMs ~= nil,
+    }
+end
+
+function DC.dps:MarkRuntimeGraphSnapshotExported(now)
+    local runtime = self:EnsureGraphRuntimeState()
+
+    if runtime == nil then
+        return
+    end
+
+    runtime.lastExportedAtMs = math.max(0, math.floor(tonumber(now) or 0))
 end
 
 function DC.dps:CommitFinishedActiveSegment()
@@ -318,7 +633,7 @@ function DC.dps:GetLiveSessionActiveDurationMs()
     return totalDuration
 end
 
-function DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
+function DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue, abilityId)
     if not self:IsDamageResult(result) then
         return
     end
@@ -350,6 +665,22 @@ function DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
     self:TrackActiveDuration(currentNow)
 
     if countsAsPersonal then
+        local runtime = self:EnsureGraphRuntimeState()
+
+        if runtime ~= nil then
+            local isDotDamage = self:IsDotDamageResult(result)
+
+            runtime.lastPersonalDamageAtMs = currentNow
+
+            if isDotDamage then
+                self:PushGraphDamageEvent(runtime.recentDotHits, currentNow, damageAmount)
+            else
+                runtime.lastDirectDamageAtMs = currentNow
+                self:PushGraphDamageEvent(runtime.recentDirectHits, currentNow, damageAmount)
+                self:ResolvePendingSwap(currentNow)
+            end
+        end
+
         self.liveSessionPlayerDamage = (self.liveSessionPlayerDamage or 0) + damageAmount
     end
 
@@ -711,4 +1042,22 @@ function DC.dps:Initialize()
     self:ResetDisplayStates()
     self:ResetLiveSession()
     self:SyncDisplayStatesToReal()
+    self:StartSwapTracking()
+end
+
+function DC.dps:OnActionBarUpdated()
+    local currentNow = GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
+    self:BeginPendingSwap(currentNow)
+end
+
+function DC.dps:StartSwapTracking()
+    if self.swapTracking then
+        return
+    end
+
+    self.swapTracking = true
+
+    EVENT_MANAGER:RegisterForEvent(DC.name .. "DpsSwap", EVENT_ACTION_BAR_UPDATED, function()
+        self:OnActionBarUpdated()
+    end)
 end

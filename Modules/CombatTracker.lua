@@ -455,7 +455,7 @@ function DC.combatTracker:OnCombatEvent(_, result, isError, abilityName, ability
     end
 
     if isTrackedDpsDamageEvent and DC.dps and DC.dps.TrackCombatEvent then
-        DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
+        DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue, abilityId)
     end
 
     local eventInfo = {

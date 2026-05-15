@@ -141,6 +141,27 @@ function DC.dpsGraph:CreateColumns(parent, barCount, includeSecondary)
             column.secondaryMarker:SetHidden(true)
         end
 
+        column.dotLine = WINDOW_MANAGER:CreateControl(nil, parent, CT_BACKDROP)
+        column.dotLine:SetMouseEnabled(false)
+        column.dotLine:SetEdgeColor(0, 0, 0, 0)
+        column.dotLine:SetCenterColor(1, 1, 1, 0.48)
+        column.dotLine:SetHidden(true)
+
+        column.dropIcon = WINDOW_MANAGER:CreateControl(nil, parent, CT_LABEL)
+        column.dropIcon:SetMouseEnabled(false)
+        column.dropIcon:SetFont("ZoFontGameSmall")
+        column.dropIcon:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
+        column.dropIcon:SetVerticalAlignment(TEXT_ALIGN_CENTER)
+        column.dropIcon:SetText("x")
+        column.dropIcon:SetHidden(true)
+
+        column.swapLabel = WINDOW_MANAGER:CreateControl(nil, parent, CT_LABEL)
+        column.swapLabel:SetMouseEnabled(false)
+        column.swapLabel:SetFont("ZoFontGameSmall")
+        column.swapLabel:SetHorizontalAlignment(TEXT_ALIGN_CENTER)
+        column.swapLabel:SetVerticalAlignment(TEXT_ALIGN_CENTER)
+        column.swapLabel:SetHidden(true)
+
         columns[index] = column
     end
 
@@ -163,6 +184,18 @@ function DC.dpsGraph:HideColumns(columns)
 
         if column.secondaryMarker ~= nil then
             column.secondaryMarker:SetHidden(true)
+        end
+
+        if column.dotLine ~= nil then
+            column.dotLine:SetHidden(true)
+        end
+
+        if column.dropIcon ~= nil then
+            column.dropIcon:SetHidden(true)
+        end
+
+        if column.swapLabel ~= nil then
+            column.swapLabel:SetHidden(true)
         end
     end
 end
@@ -211,6 +244,7 @@ function DC.dpsGraph:AttachMiniSparkline(row)
     row.sparkline.backdrop:SetCenterColor(0.02, 0.018, 0.015, 0.18)
     row.sparkline.backdrop:SetEdgeColor(0, 0, 0, 0)
     row.sparkline.columns = self:CreateColumns(row.sparkline, self:GetMiniPointCount(), true)
+    row.sparkline.allowAnnotations = false
     row.sparkline.innerPaddingX = self.miniPaddingX
 end
 
@@ -260,6 +294,7 @@ function DC.dpsGraph:CreateControl()
     control.graphCanvas.midline:SetEdgeColor(0, 0, 0, 0)
 
     control.graphCanvas.innerPaddingX = self.graphPaddingX
+    control.graphCanvas.allowAnnotations = true
     control.graphColumns = self:CreateColumns(control.graphCanvas, self:GetLargePointCount(), true)
 
     control.graphCanvas.peakMarker = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_BACKDROP)
@@ -441,6 +476,27 @@ function DC.dpsGraph:CalculateTrendDisplayValue(samples, sampleIndex, baseTrendV
     return math.max(0, math.floor((safeBaseTrend * 0.60) + (reactiveValue * 0.40) + 0.5))
 end
 
+function DC.dpsGraph:GetSmartTrendValue(sample, calculatedTrendValue)
+    local safeTrendValue = math.max(0, math.floor(tonumber(calculatedTrendValue) or 0))
+
+    if sample == nil then
+        return safeTrendValue
+    end
+
+    local emaTotalDps = math.max(0, math.floor(tonumber(sample.totalEmaDps) or 0))
+    local instantDirectDps = math.max(0, math.floor(tonumber(sample.instantDirectDps) or 0))
+
+    if emaTotalDps <= 0 then
+        return safeTrendValue
+    end
+
+    if sample.dropActive == true then
+        return math.max(0, math.floor((safeTrendValue * 0.34) + (emaTotalDps * 0.18) + (instantDirectDps * 0.48) + 0.5))
+    end
+
+    return math.max(0, math.floor((safeTrendValue * 0.64) + (emaTotalDps * 0.36) + 0.5))
+end
+
 function DC.dpsGraph:BuildRawSeries(mode)
     local samples = DC.dps and DC.dps.GetGraphSamples and DC.dps:GetGraphSamples(mode) or {}
     local graphMode = self:GetSelectedGraphMode()
@@ -457,9 +513,13 @@ function DC.dpsGraph:BuildRawSeries(mode)
             local trendPrimary, trendSecondary, trendPrimaryKey, trendSecondaryKey = self:GetTrendValuesFromSample(sample)
             local primaryValue = trendPrimary
             local secondaryValue = trendSecondary
+            local dotValue = math.max(0, math.floor(tonumber(sample.dotSupportDps) or 0))
 
             if graphMode == DC.graphModes.BURST then
-                primaryValue = self:CalculateBurstDisplayValue(samples, sampleIndex)
+                primaryValue = math.max(
+                    self:CalculateBurstDisplayValue(samples, sampleIndex),
+                    math.max(0, math.floor(tonumber(sample.instantDirectDps) or 0))
+                )
                 secondaryValue = trendSecondary
                 meta.secondaryLabel = DC:GetString(trendSecondaryKey)
                 meta.secondaryLabelKey = trendSecondaryKey
@@ -469,7 +529,7 @@ function DC.dpsGraph:BuildRawSeries(mode)
                 meta.secondaryLabel = DC:GetString(trendSecondaryKey)
                 meta.secondaryLabelKey = trendSecondaryKey
             else
-                primaryValue = self:CalculateTrendDisplayValue(samples, sampleIndex, trendPrimary)
+                primaryValue = self:GetSmartTrendValue(sample, self:CalculateTrendDisplayValue(samples, sampleIndex, trendPrimary))
                 secondaryValue = trendSecondary
                 meta.primaryLabel = DC:GetString(trendPrimaryKey)
                 meta.secondaryLabel = DC:GetString(trendSecondaryKey)
@@ -478,11 +538,17 @@ function DC.dpsGraph:BuildRawSeries(mode)
 
             primaryValue = self:GetWarmupCappedValue(sample, primaryValue)
             secondaryValue = self:GetWarmupCappedValue(sample, secondaryValue)
+            dotValue = self:GetWarmupCappedValue(sample, dotValue)
 
             table.insert(rawSeries, {
                 timestamp = math.max(0, math.floor(tonumber(sample.timestamp) or 0)),
                 primaryValue = math.max(0, math.floor(tonumber(primaryValue) or 0)),
                 secondaryValue = math.max(0, math.floor(tonumber(secondaryValue) or 0)),
+                dotValue = math.max(0, math.floor(tonumber(dotValue) or 0)),
+                dropActive = sample.dropActive == true,
+                dropCause = sample.dropCause,
+                swapLatencyMs = sample.swapLatencyMs,
+                swapFresh = sample.swapFresh == true,
             })
         end
     end
@@ -504,10 +570,15 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
     local primaryMax = 0
     local secondaryMin = nil
     local secondaryMax = 0
+    local dotMin = nil
+    local dotMax = 0
     local peakIndex = 1
     local lastValue = 0
     local previousValue = 0
     local lastSecondaryValue = 0
+    local lastDotValue = 0
+    local dropCount = 0
+    local lastSwapLatencyMs = nil
 
     if sampleCount <= 0 then
         return {
@@ -519,6 +590,8 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             primaryMax = 0,
             secondaryMin = 0,
             secondaryMax = 0,
+            dotMin = 0,
+            dotMax = 0,
             lowValue = 0,
             peakValue = 0,
             peakIndex = 1,
@@ -526,6 +599,9 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             lastValue = 0,
             previousValue = 0,
             lastSecondaryValue = 0,
+            lastDotValue = 0,
+            dropCount = 0,
+            lastSwapLatencyMs = nil,
         }
     end
 
@@ -536,6 +612,7 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
 
         local pointPrimary = math.max(0, math.floor(tonumber(point.primaryValue) or 0))
         local pointSecondary = math.max(0, math.floor(tonumber(point.secondaryValue) or 0))
+        local pointDot = math.max(0, math.floor(tonumber(point.dotValue) or 0))
 
         if primaryMin == nil or pointPrimary < primaryMin then
             primaryMin = pointPrimary
@@ -545,12 +622,25 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             secondaryMin = pointSecondary
         end
 
+        if dotMin == nil or pointDot < dotMin then
+            dotMin = pointDot
+        end
+
         primaryMax = math.max(primaryMax, pointPrimary)
         secondaryMax = math.max(secondaryMax, pointSecondary)
+        dotMax = math.max(dotMax, pointDot)
     end
 
     for pointIndex, point in ipairs(rawSeries) do
         absorbPoint(point)
+
+        if point.dropActive == true then
+            dropCount = dropCount + 1
+        end
+
+        if point.swapFresh == true and point.swapLatencyMs ~= nil then
+            lastSwapLatencyMs = math.max(0, math.floor(tonumber(point.swapLatencyMs) or 0))
+        end
 
         if (point.primaryValue or 0) >= primaryMax then
             peakIndex = pointIndex
@@ -559,12 +649,14 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
 
     lastValue = rawSeries[sampleCount].primaryValue or 0
     lastSecondaryValue = rawSeries[sampleCount].secondaryValue or 0
+    lastDotValue = rawSeries[sampleCount].dotValue or 0
     previousValue = sampleCount > 1 and (rawSeries[sampleCount - 1].primaryValue or lastValue) or lastValue
 
     if sampleCount == 1 then
         local singlePoint = rawSeries[1]
         local singlePrimary = math.max(0, math.floor(tonumber(singlePoint and singlePoint.primaryValue) or 0))
         local singleSecondary = math.max(0, math.floor(tonumber(singlePoint and singlePoint.secondaryValue) or 0))
+        local singleDot = math.max(0, math.floor(tonumber(singlePoint and singlePoint.dotValue) or 0))
 
         for bucketIndex = 1, bucketCount do
             buckets[bucketIndex] = {
@@ -572,6 +664,11 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
                 primaryMax = singlePrimary,
                 primaryLast = singlePrimary,
                 secondaryLast = singleSecondary,
+                dotLast = singleDot,
+                dropActive = singlePoint.dropActive == true,
+                dropCause = singlePoint.dropCause,
+                swapLatencyMs = singlePoint.swapLatencyMs,
+                swapFresh = singlePoint.swapFresh == true,
             }
         end
     elseif sampleCount < bucketCount then
@@ -587,14 +684,23 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             local rightPrimary = math.max(0, math.floor(tonumber(rightPoint and rightPoint.primaryValue) or leftPrimary))
             local leftSecondary = math.max(0, math.floor(tonumber(leftPoint and leftPoint.secondaryValue) or 0))
             local rightSecondary = math.max(0, math.floor(tonumber(rightPoint and rightPoint.secondaryValue) or leftSecondary))
+            local leftDot = math.max(0, math.floor(tonumber(leftPoint and leftPoint.dotValue) or 0))
+            local rightDot = math.max(0, math.floor(tonumber(rightPoint and rightPoint.dotValue) or leftDot))
             local interpolatedPrimary = math.floor(leftPrimary + ((rightPrimary - leftPrimary) * lerpT) + 0.5)
             local interpolatedSecondary = math.floor(leftSecondary + ((rightSecondary - leftSecondary) * lerpT) + 0.5)
+            local interpolatedDot = math.floor(leftDot + ((rightDot - leftDot) * lerpT) + 0.5)
+            local sampleForFlags = lerpT >= 0.5 and rightPoint or leftPoint
 
             buckets[bucketIndex] = {
                 primaryMin = math.min(leftPrimary, rightPrimary, interpolatedPrimary),
                 primaryMax = math.max(leftPrimary, rightPrimary, interpolatedPrimary),
                 primaryLast = interpolatedPrimary,
                 secondaryLast = interpolatedSecondary,
+                dotLast = interpolatedDot,
+                dropActive = sampleForFlags and sampleForFlags.dropActive == true or false,
+                dropCause = sampleForFlags and sampleForFlags.dropCause or nil,
+                swapLatencyMs = sampleForFlags and sampleForFlags.swapLatencyMs or nil,
+                swapFresh = sampleForFlags and sampleForFlags.swapFresh == true or false,
             }
         end
     else
@@ -607,6 +713,11 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             local bucketPrimaryMax = 0
             local bucketPrimaryLast = 0
             local bucketSecondaryLast = 0
+            local bucketDotLast = 0
+            local bucketDropActive = false
+            local bucketDropCause = nil
+            local bucketSwapLatencyMs = nil
+            local bucketSwapFresh = false
 
             startIndex = math.max(1, math.min(sampleCount, startIndex))
             endIndex = math.max(startIndex, math.min(sampleCount, endIndex))
@@ -623,6 +734,17 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
                 bucketPrimaryMax = math.max(bucketPrimaryMax, pointPrimary)
                 bucketPrimaryLast = pointPrimary
                 bucketSecondaryLast = pointSecondary
+                bucketDotLast = math.max(0, math.floor(tonumber(point and point.dotValue) or 0))
+
+                if point and point.dropActive == true then
+                    bucketDropActive = true
+                    bucketDropCause = point.dropCause or bucketDropCause
+                end
+
+                if point and point.swapFresh == true and point.swapLatencyMs ~= nil then
+                    bucketSwapLatencyMs = math.max(0, math.floor(tonumber(point.swapLatencyMs) or 0))
+                    bucketSwapFresh = true
+                end
             end
 
             buckets[bucketIndex] = {
@@ -630,6 +752,11 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
                 primaryMax = bucketPrimaryMax,
                 primaryLast = bucketPrimaryLast,
                 secondaryLast = bucketSecondaryLast,
+                dotLast = bucketDotLast,
+                dropActive = bucketDropActive,
+                dropCause = bucketDropCause,
+                swapLatencyMs = bucketSwapLatencyMs,
+                swapFresh = bucketSwapFresh,
             }
         end
     end
@@ -650,6 +777,8 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
         primaryMax = primaryMax,
         secondaryMin = secondaryMin or 0,
         secondaryMax = secondaryMax,
+        dotMin = dotMin or 0,
+        dotMax = dotMax,
         lowValue = primaryMin or 0,
         peakValue = primaryMax,
         peakIndex = peakIndex,
@@ -657,6 +786,9 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
         lastValue = lastValue,
         previousValue = previousValue,
         lastSecondaryValue = lastSecondaryValue,
+        lastDotValue = lastDotValue,
+        dropCount = dropCount,
+        lastSwapLatencyMs = lastSwapLatencyMs,
     }
 end
 
@@ -775,8 +907,8 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
     local activeCount = math.min(#buckets, totalColumns)
     local visibleCount = math.max(1, activeCount)
     local barWidth = usableWidth / visibleCount
-    local combinedMin = math.min(dataset.primaryMin or 0, dataset.secondaryMin or 0)
-    local combinedMax = math.max(dataset.primaryMax or 0, dataset.secondaryMax or 0)
+    local combinedMin = math.min(dataset.primaryMin or 0, dataset.secondaryMin or 0, dataset.dotMin or 0)
+    local combinedMax = math.max(dataset.primaryMax or 0, dataset.secondaryMax or 0, dataset.dotMax or 0)
     local visualMin, visualMax = self:GetVisualRange(combinedMin, combinedMax)
     local valueRange = math.max(1, visualMax - visualMin)
     local previousPrimaryValue = nil
@@ -786,6 +918,7 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
     local spreadValue = math.max(1, peakValue - lowValue)
     local slumpThreshold = lowValue + math.max(250, math.floor(spreadValue * 0.16))
     local nearPeakThreshold = math.max(peakValue - math.max(250, math.floor(spreadValue * 0.05)), math.floor(peakValue * 0.96))
+    local annotationAllowed = container.allowAnnotations == true
 
     self:UpdateReferenceLine(container, combinedMin, combinedMax, dataset.lastValue or 0)
 
@@ -798,11 +931,17 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
             local primaryMax = math.max(primaryLast, math.floor(tonumber(bucket and bucket.primaryMax) or 0))
             local primaryMin = math.max(0, math.floor(tonumber(bucket and bucket.primaryMin) or 0))
             local secondaryLast = math.max(0, math.floor(tonumber(bucket and bucket.secondaryLast) or 0))
+            local dotLast = math.max(0, math.floor(tonumber(bucket and bucket.dotLast) or 0))
+            local isDropBar = bucket and bucket.dropActive == true or false
+            local swapLatencyMs = bucket and bucket.swapLatencyMs or nil
+            local hasFreshSwap = bucket and bucket.swapFresh == true and swapLatencyMs ~= nil
             local normalizedPrimary = (math.max(visualMin, math.min(visualMax, primaryLast)) - visualMin) / valueRange
             local normalizedSecondary = (math.max(visualMin, math.min(visualMax, secondaryLast)) - visualMin) / valueRange
+            local normalizedDot = (math.max(visualMin, math.min(visualMax, dotLast)) - visualMin) / valueRange
             local burstFactor = (math.max(visualMin, math.min(visualMax, primaryMax)) - math.max(visualMin, math.min(visualMax, primaryMin))) / valueRange
             local fillHeight = math.max(2, math.floor((height - 2) * normalizedPrimary))
             local secondaryOffset = math.max(0, math.floor((height - 2) * normalizedSecondary))
+            local dotOffset = math.max(0, math.floor((height - 2) * normalizedDot))
             local ageT = activeCount > 1 and ((barIndex - 1) / (activeCount - 1)) or 1
             local directionDelta = previousPrimaryValue == nil and 0 or (primaryLast - previousPrimaryValue)
             local directionTint = 0
@@ -836,6 +975,7 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
             local highColor = { 0.62, 0.76, 0.42 }
             local peakColor = { 0.92, 0.74, 0.36 }
             local baseColor = { valueColorR, valueColorG, valueColorB }
+            local slumpColor = { 1.00, 0.55, 0.00 }
             local isPeakBar = peakValue > 0 and (barIndex == peakIndex or primaryLast >= nearPeakThreshold)
             local isLowBar = spreadValue > 0 and primaryLast <= slumpThreshold
             local blendedBase = self:BlendRgb(warmColor, highColor, normalizedPrimary)
@@ -859,7 +999,15 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
                 fillBlue = self:ClampColor(fillBlue * (1 - (dropTint * 0.18)) + (0.26 * dropTint * 0.18))
             end
 
-            if isPeakBar then
+            if isDropBar then
+                fillRed = slumpColor[1]
+                fillGreen = slumpColor[2]
+                fillBlue = slumpColor[3]
+                capRed = 1.0
+                capGreen = 0.78
+                capBlue = 0.28
+                alpha = math.min(0.94, alpha + 0.12)
+            elseif isPeakBar then
                 local peakBlend = self:BlendRgb(baseColor, peakColor, 0.88)
                 fillRed = peakBlend[1]
                 fillGreen = peakBlend[2]
@@ -892,8 +1040,8 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
             column.fill:SetHidden(false)
 
             column.primaryCap:ClearAnchors()
-            column.primaryCap:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -math.max(0, fillHeight - 2))
-            column.primaryCap:SetDimensions(finalWidth, isPeakBar and 3 or 2)
+            column.primaryCap:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset + (isDropBar and math.max(1, math.floor(finalWidth * 0.18)) or 0), -math.max(0, fillHeight - 2))
+            column.primaryCap:SetDimensions(math.max(1, finalWidth - (isDropBar and math.max(1, math.floor(finalWidth * 0.18)) or 0)), isPeakBar and 3 or 2)
             column.primaryCap:SetCenterColor(capRed, capGreen, capBlue, 0.96)
             column.primaryCap:SetHidden(false)
 
@@ -905,12 +1053,67 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
                 column.secondaryMarker:SetHidden(false)
             end
 
+            if column.dotLine ~= nil then
+                column.dotLine:ClearAnchors()
+                column.dotLine:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -dotOffset)
+                column.dotLine:SetDimensions(finalWidth, isDropBar and 2 or 1)
+                column.dotLine:SetCenterColor(labelColorR, labelColorG, labelColorB, isDropBar and 0.72 or 0.46)
+
+                if dotLast <= 0 then
+                    column.dotLine:SetHidden(true)
+                else
+                    column.dotLine:SetHidden(false)
+                end
+            end
+
+            if column.dropIcon ~= nil then
+                if annotationAllowed and isDropBar then
+                    column.dropIcon:ClearAnchors()
+                    column.dropIcon:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset, -math.min(height - 2, fillHeight + 14))
+                    column.dropIcon:SetDimensions(finalWidth, 12)
+                    column.dropIcon:SetColor(1.0, 0.55, 0.0, 0.95)
+                    column.dropIcon:SetHidden(false)
+                else
+                    column.dropIcon:SetHidden(true)
+                end
+            end
+
+            if column.swapLabel ~= nil then
+                if annotationAllowed and hasFreshSwap then
+                    local swapColor = { labelColorR, labelColorG, labelColorB }
+
+                    if swapLatencyMs > 250 then
+                        swapColor = { 1.0, 0.38, 0.38 }
+                    elseif swapLatencyMs < 150 then
+                        swapColor = { 0.44, 0.90, 0.52 }
+                    end
+
+                    column.swapLabel:ClearAnchors()
+                    column.swapLabel:SetAnchor(BOTTOMLEFT, container, BOTTOMLEFT, leftOffset - 6, -math.min(height - 2, fillHeight + 26))
+                    column.swapLabel:SetDimensions(finalWidth + 12, 14)
+                    column.swapLabel:SetColor(swapColor[1], swapColor[2], swapColor[3], 1.0)
+                    column.swapLabel:SetText(string.format("%d ms", math.max(0, math.floor(tonumber(swapLatencyMs) or 0))))
+                    column.swapLabel:SetHidden(false)
+                else
+                    column.swapLabel:SetHidden(true)
+                end
+            end
+
             previousPrimaryValue = primaryLast
         else
             column.fill:SetHidden(true)
             column.primaryCap:SetHidden(true)
             if column.secondaryMarker ~= nil then
                 column.secondaryMarker:SetHidden(true)
+            end
+            if column.dotLine ~= nil then
+                column.dotLine:SetHidden(true)
+            end
+            if column.dropIcon ~= nil then
+                column.dropIcon:SetHidden(true)
+            end
+            if column.swapLabel ~= nil then
+                column.swapLabel:SetHidden(true)
             end
         end
     end
@@ -1043,6 +1246,7 @@ function DC.dpsGraph:UpdateWindowText(now)
     local dataset = self:BuildCompressedBuckets(mode, self:GetLargePointCount())
     local playerText = DC.formatter:FormatFull(dataset.lastValue or 0)
     local secondaryText = DC.formatter:FormatFull(dataset.lastSecondaryValue or 0)
+    local dotText = DC.formatter:FormatFull(dataset.lastDotValue or 0)
     local combatTimeText = DC.hud and DC.hud.FormatCombatTime and DC.hud:FormatCombatTime(snapshot.combatDurationMs or 0) or "00:00.000"
     local primaryParts = {
         string.format("%s: %s", tostring(dataset.meta and dataset.meta.primaryLabel or DC:GetString("hudDpsLabel")), playerText),
@@ -1073,6 +1277,7 @@ function DC.dpsGraph:UpdateWindowText(now)
         tostring(dataset.meta and dataset.meta.secondaryLabel or DC:GetString("hudDpsAverageShort")),
         secondaryText
     ))
+    table.insert(primaryParts, string.format("%s: %s", DC:GetString("dpsGraphDotLabel"), dotText))
 
     if snapshot.groupDps ~= nil then
         table.insert(secondaryParts, string.format("%s: %s", DC:GetString("hudDpsGroupLabel"), DC.formatter:FormatFull(snapshot.groupDps)))
@@ -1085,6 +1290,14 @@ function DC.dpsGraph:UpdateWindowText(now)
     table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphPeakLabel"), DC.formatter:FormatFull(dataset.peakValue or 0)))
     table.insert(secondaryParts, string.format("%s: %s", DC:GetString("dpsGraphLowLabel"), DC.formatter:FormatFull(dataset.lowValue or 0)))
     table.insert(secondaryParts, string.format("%s: %s%.1f%%", DC:GetString("dpsGraphDeltaLabel"), deltaPrefix, deltaPercent))
+
+    if (dataset.dropCount or 0) > 0 then
+        table.insert(secondaryParts, string.format("%s: %d", DC:GetString("dpsGraphDropsLabel"), math.max(0, math.floor(tonumber(dataset.dropCount) or 0))))
+    end
+
+    if dataset.lastSwapLatencyMs ~= nil then
+        table.insert(secondaryParts, string.format("%s: %d ms", DC:GetString("dpsGraphSwapLabel"), math.max(0, math.floor(tonumber(dataset.lastSwapLatencyMs) or 0))))
+    end
 
     self.control.summaryPrimaryLabel:SetText(table.concat(primaryParts, " | "))
     self.control.summarySecondaryLabel:SetText(table.concat(secondaryParts, " | "))
