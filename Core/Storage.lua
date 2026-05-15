@@ -55,13 +55,12 @@ DC.storage = {
             hudWidth = 350,
             contentPaddingX = 14,
             contentPaddingY = 10,
-            labelAreaWidth = 150,
             fontStyle = DC.fontStyles.SOFT_SHADOW_THICK,
             labelFontFace = DC.fontFaces.BOLD,
             valueFontFace = DC.fontFaces.BOLD,
             popupFontFace = DC.fontFaces.BOLD,
-            labelFontSize = 18,
-            valueFontSize = 18,
+            labelFontSize = 16,
+            valueFontSize = 16,
             labelColorR = 1.0,
             labelColorG = 1.0,
             labelColorB = 1.0,
@@ -71,7 +70,7 @@ DC.storage = {
             valueColorB = 0.5568,
             valueColorA = 1.0,
             statusFontSize = 12,
-            tooltipFontSize = 15,
+            tooltipFontSize = 16,
             hitFontSize = 14,
             animateCounter = true,
             counterAnimationMs = 350,
@@ -600,6 +599,28 @@ function DC.storage:GetIntegrityStatusText()
     end
 
     return DC:GetString("statusVerified")
+end
+
+function DC.storage:BuildSessionIntegrityPayload()
+    local payload = {
+        tostring(self.sv.installId or ""),
+        tostring(self.sv.integritySalt or ""),
+        tostring((self.sessionStats and self.sessionStats.damage) or 0),
+        tostring((self.sessionStats and self.sessionStats.blocked) or 0),
+        tostring((self.sessionStats and self.sessionStats.healed) or 0),
+        tostring((self.sessionStats and self.sessionStats.received) or 0),
+        tostring(self.sessionPlayerDamage or 0),
+        tostring(self.sessionGroupDamage or 0),
+        tostring(self.sessionCombatDurationMs or 0),
+        tostring(self.sessionActiveCombatDurationMs or 0),
+        tostring(DC.savedVariableVersion),
+    }
+
+    return table.concat(payload, "|")
+end
+
+function DC.storage:GetSessionIntegrityHash()
+    return string.upper(DC.integrity:Checksum(self:BuildSessionIntegrityPayload()))
 end
 
 function DC.storage:AddMetric(metricKey, amount, includeSession, countAsHit)

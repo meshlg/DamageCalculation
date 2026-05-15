@@ -206,6 +206,21 @@ function DC.hud:GetPopupWidth()
     return math.max(140, usableWidth)
 end
 
+function DC.hud:GetAutoCaptionWidth()
+    local widestCaption = 0
+
+    for _, metricKey in ipairs(self:GetVisibleMetricKeys()) do
+        local row = self.metricRows[metricKey]
+
+        if row ~= nil and row.captionLabel ~= nil then
+            row.captionLabel:SetText(self:GetCaptionText(metricKey))
+            widestCaption = math.max(widestCaption, row.captionLabel:GetTextWidth() or 0)
+        end
+    end
+
+    return math.max(40, math.floor(widestCaption + 12))
+end
+
 function DC.hud:IsInlineValueLayout()
     return self:GetSettings().valueLayoutMode == "inlineRight"
 end
@@ -455,7 +470,7 @@ function DC.hud:CreateControl()
     control:SetClampedToScreen(true)
     control:SetDrawLayer(DL_OVERLAY)
     control:SetDrawTier(DT_HIGH)
-    control:SetMovable(true)
+    control:SetMovable(false)
     control:SetMouseEnabled(true)
     control:ClearAnchors()
     control:SetAnchor(TOPLEFT, GuiRoot, TOPLEFT, self:GetSettings().positionX, self:GetSettings().positionY)
@@ -488,12 +503,14 @@ function DC.hud:CreateControl()
 
     control:SetHandler("OnMouseDown", function(window, button)
         if button == MOUSE_BUTTON_INDEX_RIGHT and not self:GetSettings().lockWindow then
+            window:SetMovable(true)
             window:StartMoving()
         end
     end)
 
     control:SetHandler("OnMouseUp", function(window)
         window:StopMovingOrResizing()
+        window:SetMovable(false)
     end)
 
     control:SetHandler("OnMoveStop", function(window)
@@ -620,7 +637,7 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
             captionWidth = row.captionLabel:GetTextWidth() + 8
             row.valueLabel:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
         else
-            captionWidth = math.max(40, math.floor(tonumber(settings.labelAreaWidth) or 150))
+            captionWidth = self:GetAutoCaptionWidth()
             row.valueLabel:SetHorizontalAlignment(TEXT_ALIGN_RIGHT)
         end
     else

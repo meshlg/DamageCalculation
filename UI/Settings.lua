@@ -4,6 +4,46 @@ DC.settings = {
     panelId = DC.name .. "Options",
 }
 
+function DC.settings:ColorizeText(text, colorHex)
+    return string.format("|c%s%s|r", tostring(colorHex or "FFFFFF"), tostring(text or ""))
+end
+
+function DC.settings:GetIntegrityStateMarkup(isModified)
+    local statusText = isModified and DC:GetString("statusModified") or DC:GetString("statusVerified")
+    local colorHex = isModified and "FF5A5A" or "66D17A"
+    local iconPath = isModified and "EsoUI/Art/Buttons/decline_up.dds" or "EsoUI/Art/Buttons/accept_up.dds"
+    local iconMarkup = string.format("|t16:16:%s|t ", iconPath)
+
+    return iconMarkup .. self:ColorizeText(statusText, colorHex)
+end
+
+function DC.settings:GetIntegrityStatusMarkup()
+    return self:GetIntegrityStateMarkup(DC.storage:IsModified())
+end
+
+function DC.settings:GetIntegritySessionHashText()
+    return DC:GetString("menuSessionHashDescription", DC.storage:GetSessionIntegrityHash())
+end
+
+function DC.settings:GetIntegrityDescriptionMarkup()
+    local sectionColor = "D8C27A"
+    local whatTitle = self:ColorizeText(DC:GetString("menuIntegritySectionWhat"), sectionColor)
+    local howTitle = self:ColorizeText(DC:GetString("menuIntegritySectionHow"), sectionColor)
+    local statesTitle = self:ColorizeText(DC:GetString("menuIntegritySectionStates"), sectionColor)
+
+    return table.concat({
+        whatTitle,
+        DC:GetString("menuIntegrityDescriptionIntro"),
+        "",
+        howTitle,
+        DC:GetString("menuIntegrityDescriptionCheck"),
+        "",
+        statesTitle,
+        string.format("%s %s", self:GetIntegrityStateMarkup(false), DC:GetString("menuIntegrityDescriptionVerified")),
+        string.format("%s %s", self:GetIntegrityStateMarkup(true), DC:GetString("menuIntegrityDescriptionModified")),
+    }, "\n")
+end
+
 function DC.settings:RefreshPanel()
     if self.panel and self.panel.RefreshPanel then
         self.panel:RefreshPanel()
@@ -541,31 +581,6 @@ function DC.settings:Initialize()
             end,
             default = defaults.scale,
             width = "full",
-        },
-        {
-            type = "slider",
-            name = function()
-                return DC:GetString("menuLabelWidthName")
-            end,
-            tooltip = function()
-                return DC:GetString("menuLabelWidthTooltip")
-            end,
-            min = 40,
-            max = 400,
-            step = 5,
-            getFunc = function()
-                return DC.storage:GetSettings().labelAreaWidth
-            end,
-            setFunc = function(value)
-                DC.storage:SetSetting("labelAreaWidth", value)
-                DC:RefreshAll()
-            end,
-            default = defaults.labelAreaWidth,
-            width = "half",
-            disabled = function()
-                local settings = DC.storage:GetSettings()
-                return not settings.showLabel or settings.valueLayoutMode ~= "separate"
-            end,
         },
         {
             type = "checkbox",
@@ -1225,6 +1240,13 @@ function DC.settings:Initialize()
             width = "full",
         },
         {
+            type = "description",
+            text = function()
+                return DC.settings:GetIntegrityDescriptionMarkup()
+            end,
+            width = "full",
+        },
+        {
             type = "checkbox",
             name = function()
                 return DC:GetString("menuShowVerifiedName")
@@ -1245,9 +1267,31 @@ function DC.settings:Initialize()
         {
             type = "description",
             text = function()
-                return DC:GetString("menuStatusDescription", DC.storage:GetIntegrityStatusText())
+                return DC:GetString("menuStatusDescription", DC.settings:GetIntegrityStatusMarkup())
             end,
             width = "full",
+        },
+        {
+            type = "custom",
+            width = "full",
+            minHeight = 18,
+            maxHeight = 18,
+            createFunc = function(control)
+                local label = WINDOW_MANAGER:CreateControl(nil, control, CT_LABEL)
+                label:SetAnchor(TOPLEFT, control, TOPLEFT, 0, 0)
+                label:SetAnchor(TOPRIGHT, control, TOPRIGHT, 0, 0)
+                label:SetFont("ZoFontGameSmall")
+                label:SetColor(0.56, 0.56, 0.56, 1.0)
+                label:SetHorizontalAlignment(TEXT_ALIGN_LEFT)
+                label:SetVerticalAlignment(TEXT_ALIGN_TOP)
+                label:SetText(DC.settings:GetIntegritySessionHashText())
+                control.hashLabel = label
+            end,
+            refreshFunc = function(control)
+                if control.hashLabel then
+                    control.hashLabel:SetText(DC.settings:GetIntegritySessionHashText())
+                end
+            end,
         },
         {
             type = "header",

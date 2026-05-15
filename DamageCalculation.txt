@@ -1,7 +1,7 @@
 ## Title: Damage Calculation
 ## Description: Persistent total damage counter with HUD, formatting modes, visual customization, hit popups, and integrity checks.
-## Author: meshlg
-## Version: 1.0.0
+## Author: meshlg (@ArtieFox)
+## Version: 1.0.1448
 ## APIVersion: 101049 101050
 ## SavedVariables: DamageCalculationSavedVariables
 ## DependsOn: LibAddonMenu-2.0

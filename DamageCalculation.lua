@@ -4,7 +4,7 @@ local DC = DamageCalculation
 
 DC.name = "DamageCalculation"
 DC.displayName = "Damage Calculation"
-DC.version = "1.0.0"
+DC.version = "1.0.1448"
 DC.savedVariableName = "DamageCalculationSavedVariables"
 DC.savedVariableVersion = 1
 
