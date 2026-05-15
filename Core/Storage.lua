@@ -38,6 +38,9 @@ DC.storage = {
             dpsMode = DC.dpsModes.COMPATIBLE,
             dpsGraphAutoShowInCombat = true,
             dpsGraphMode = DC.graphModes.TREND,
+            showMiniDpsGraph = true,
+            showLargeDpsGraph = true,
+            dpsGraphPointCount = 90,
             language = DC.languageModes.AUTO,
             showDamageMetric = true,
             showBlockedMetric = true,
@@ -163,6 +166,10 @@ function DC.storage:EnsureSettings()
         if self.sv.settings[key] == nil then
             self.sv.settings[key] = value
         end
+    end
+
+    if self.sv.settings.showLargeDpsGraph == false then
+        self.sv.settings.dpsGraphAutoShowInCombat = false
     end
 end
 

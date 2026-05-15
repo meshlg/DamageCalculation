@@ -5,7 +5,7 @@ local dpsModeList = { DC.dpsModes.COMPATIBLE, DC.dpsModes.AVERAGE }
 DC.dps = {
     refreshIntervalMs = 250,
     graphSampleIntervalMs = 250,
-    graphMaxSamples = 180,
+    graphMaxSamples = 260,
     initialDisplayDurationMs = 1000,
     recentHitWindowMs = 1500,
     softFreezeWindowMs = 3500,
@@ -189,6 +189,8 @@ function DC.dps:CaptureGraphSampleForMode(mode, now)
     local currentNow = math.max(0, math.floor(tonumber(now) or 0))
     local snapshot = self:GetModeSnapshot(mode, currentNow)
     local history = self.graphHistories[mode]
+    local encounterDurationMs = DC.combatTracker and DC.combatTracker.GetCombatDurationMs and DC.combatTracker:GetCombatDurationMs(currentNow) or 0
+    local encounterActiveCombatDurationMs = self:GetLiveSessionActiveDurationMs()
 
     table.insert(history, {
         timestamp = currentNow,
@@ -200,6 +202,10 @@ function DC.dps:CaptureGraphSampleForMode(mode, now)
         playerDamage = snapshot.playerDamage or 0,
         groupDamage = snapshot.groupDamage or 0,
         combatDurationMs = snapshot.combatDurationMs or 0,
+        encounterDurationMs = encounterDurationMs,
+        encounterActiveCombatDurationMs = encounterActiveCombatDurationMs,
+        encounterPlayerDamage = self.liveSessionPlayerDamage or 0,
+        encounterGroupDamage = self.liveSessionGroupDamage or 0,
     })
 
     self:TrimGraphHistory(mode)
@@ -343,7 +349,6 @@ function DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
 end
 
 function DC.dps:BeginEncounter()
-    local currentNow = GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
     self:RefreshTrackedGroupUnits()
     self:ResetGraphHistories()
 
@@ -352,7 +357,6 @@ function DC.dps:BeginEncounter()
     end
 
     self:InvalidateCache()
-    self:UpdateGraphHistories(currentNow, true)
 end
 
 function DC.dps:EndEncounter(combatDurationMs)

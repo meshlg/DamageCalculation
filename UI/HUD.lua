@@ -140,7 +140,12 @@ end
 function DC.hud:GetMetricRowHeight(metricKey)
     local baseHeight = self:GetLineHeight()
 
-    if metricKey == "dps" and DC.dpsGraph and DC.dpsGraph.GetMiniHeight and DC.dpsGraph.GetMiniGap then
+    if metricKey == "dps"
+        and DC.dpsGraph
+        and DC.dpsGraph.IsMiniGraphEnabled
+        and DC.dpsGraph:IsMiniGraphEnabled()
+        and DC.dpsGraph.GetMiniHeight
+        and DC.dpsGraph.GetMiniGap then
         return baseHeight + DC.dpsGraph:GetMiniGap() + DC.dpsGraph:GetMiniHeight()
     end
 
@@ -586,7 +591,11 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
     local inlineLayout = self:IsInlineValueLayoutActive()
     local captionWidth = 0
     local rowHeight = self:GetMetricRowHeight(metricKey)
-    local hasSparkline = metricKey == "dps" and row.sparkline ~= nil
+    local hasSparkline = metricKey == "dps"
+        and row.sparkline ~= nil
+        and DC.dpsGraph ~= nil
+        and DC.dpsGraph.IsMiniGraphEnabled
+        and DC.dpsGraph:IsMiniGraphEnabled()
 
     row:SetHidden(false)
     row:ClearAnchors()
@@ -625,8 +634,14 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
     if hasSparkline then
         row.sparkline:SetHidden(false)
         row.sparkline:ClearAnchors()
-        row.sparkline:SetAnchor(BOTTOMLEFT, row.valuePulse, BOTTOMLEFT, 0, 0)
-        row.sparkline:SetAnchor(BOTTOMRIGHT, row.valuePulse, BOTTOMRIGHT, 0, 0)
+        local sparklineInset = 0
+
+        if DC.dpsGraph and DC.dpsGraph.miniPaddingX ~= nil then
+            sparklineInset = math.max(0, math.floor(tonumber(DC.dpsGraph.miniPaddingX) or 0))
+        end
+
+        row.sparkline:SetAnchor(BOTTOMLEFT, row.valuePulse, BOTTOMLEFT, sparklineInset, 0)
+        row.sparkline:SetAnchor(BOTTOMRIGHT, row.valuePulse, BOTTOMRIGHT, -sparklineInset, 0)
         row.sparkline:SetHeight(DC.dpsGraph:GetMiniHeight())
     elseif row.sparkline ~= nil then
         row.sparkline:SetHidden(true)

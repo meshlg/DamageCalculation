@@ -246,10 +246,53 @@ function DC.settings:Initialize()
                 return DC.storage:GetSettings().dpsGraphAutoShowInCombat
             end,
             setFunc = function(value)
-                DC.storage:SetSetting("dpsGraphAutoShowInCombat", value)
+                local allowAutoShow = DC.storage:GetSettings().showLargeDpsGraph ~= false
+                DC.storage:SetSetting("dpsGraphAutoShowInCombat", allowAutoShow and value or false)
                 DC:RefreshAll()
             end,
             default = defaults.dpsGraphAutoShowInCombat,
+            width = "full",
+            disabled = function()
+                return DC.storage:GetSettings().showLargeDpsGraph == false
+            end,
+        },
+        {
+            type = "checkbox",
+            name = function()
+                return DC:GetString("menuShowMiniDpsGraphName")
+            end,
+            tooltip = function()
+                return DC:GetString("menuShowMiniDpsGraphTooltip")
+            end,
+            getFunc = function()
+                return DC.storage:GetSettings().showMiniDpsGraph
+            end,
+            setFunc = function(value)
+                DC.storage:SetSetting("showMiniDpsGraph", value)
+                DC:RefreshAll()
+            end,
+            default = defaults.showMiniDpsGraph,
+            width = "full",
+        },
+        {
+            type = "checkbox",
+            name = function()
+                return DC:GetString("menuShowLargeDpsGraphName")
+            end,
+            tooltip = function()
+                return DC:GetString("menuShowLargeDpsGraphTooltip")
+            end,
+            getFunc = function()
+                return DC.storage:GetSettings().showLargeDpsGraph
+            end,
+            setFunc = function(value)
+                DC.storage:SetSetting("showLargeDpsGraph", value)
+                if not value then
+                    DC.storage:SetSetting("dpsGraphAutoShowInCombat", false)
+                end
+                DC:RefreshAll()
+            end,
+            default = defaults.showLargeDpsGraph,
             width = "full",
         },
         {
@@ -270,6 +313,27 @@ function DC.settings:Initialize()
                 DC:RefreshAll()
             end,
             default = defaults.dpsGraphMode,
+            width = "full",
+        },
+        {
+            type = "slider",
+            name = function()
+                return DC:GetString("menuDpsGraphPointCountName")
+            end,
+            tooltip = function()
+                return DC:GetString("menuDpsGraphPointCountTooltip")
+            end,
+            min = 30,
+            max = 160,
+            step = 10,
+            getFunc = function()
+                return DC.storage:GetSettings().dpsGraphPointCount
+            end,
+            setFunc = function(value)
+                DC.storage:SetSetting("dpsGraphPointCount", value)
+                DC:RefreshAll()
+            end,
+            default = defaults.dpsGraphPointCount,
             width = "full",
         },
         {
