@@ -1,0 +1,21 @@
+## Title: Damage Calculation
+## Description: Persistent total damage counter with HUD, formatting modes, visual customization, hit popups, and integrity checks.
+## Author: meshlg
+## Version: 1.0.0
+## APIVersion: 101049 101050
+## SavedVariables: DamageCalculationSavedVariables
+## DependsOn: LibAddonMenu-2.0
+
+DamageCalculation.lua
+Localization/en.lua
+Localization/ru.lua
+Core/Localization.lua
+Core/Formatter.lua
+Core/Integrity.lua
+Core/Sound.lua
+Core/Storage.lua
+Modules/DpsTracker.lua
+Modules/CombatTracker.lua
+UI/HUD.lua
+UI/Tooltip.lua
+UI/Settings.lua
