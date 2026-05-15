@@ -634,8 +634,8 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
     if hasSparkline then
         row.sparkline:SetHidden(false)
         row.sparkline:ClearAnchors()
-        row.sparkline:SetAnchor(BOTTOMLEFT, row.valuePulse, BOTTOMLEFT, 0, 0)
-        row.sparkline:SetAnchor(BOTTOMRIGHT, row.valuePulse, BOTTOMRIGHT, 0, 0)
+        row.sparkline:SetAnchor(BOTTOMLEFT, row, BOTTOMLEFT, 0, 0)
+        row.sparkline:SetAnchor(BOTTOMRIGHT, row, BOTTOMRIGHT, 0, 0)
         row.sparkline:SetHeight(DC.dpsGraph:GetMiniHeight())
     elseif row.sparkline ~= nil then
         row.sparkline:SetHidden(true)

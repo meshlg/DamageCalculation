@@ -204,7 +204,7 @@ function DC.dpsGraph:AttachMiniSparkline(row)
         return
     end
 
-    row.sparkline = WINDOW_MANAGER:CreateControl(nil, row.valuePulse, CT_CONTROL)
+    row.sparkline = WINDOW_MANAGER:CreateControl(nil, row, CT_CONTROL)
     row.sparkline:SetMouseEnabled(false)
     row.sparkline.backdrop = WINDOW_MANAGER:CreateControl(nil, row.sparkline, CT_BACKDROP)
     row.sparkline.backdrop:SetAnchorFill(row.sparkline)
