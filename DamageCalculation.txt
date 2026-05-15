@@ -16,6 +16,7 @@ Core/Sound.lua
 Core/Storage.lua
 Modules/DpsTracker.lua
 Modules/CombatTracker.lua
+UI/DpsGraph.lua
 UI/HUD.lua
 UI/Tooltip.lua
 UI/Settings.lua

@@ -208,6 +208,10 @@ function DC:RefreshDisplay()
         self.hud:Refresh()
     end
 
+    if self.dpsGraph and self.dpsGraph.Refresh then
+        self.dpsGraph:Refresh()
+    end
+
     if self.tooltip and self.tooltip.Refresh then
         self.tooltip:Refresh()
     end
@@ -312,6 +316,7 @@ function DC:Initialize()
     self.storage:Initialize()
     self.dps:Initialize()
     self.hud:Initialize()
+    self.dpsGraph:Initialize()
     self.tooltip:Initialize()
     self.settings:Initialize()
     self.combatTracker:Initialize()

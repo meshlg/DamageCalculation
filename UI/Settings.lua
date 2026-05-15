@@ -225,6 +225,24 @@ function DC.settings:Initialize()
         {
             type = "checkbox",
             name = function()
+                return DC:GetString("menuDpsGraphAutoShowName")
+            end,
+            tooltip = function()
+                return DC:GetString("menuDpsGraphAutoShowTooltip")
+            end,
+            getFunc = function()
+                return DC.storage:GetSettings().dpsGraphAutoShowInCombat
+            end,
+            setFunc = function(value)
+                DC.storage:SetSetting("dpsGraphAutoShowInCombat", value)
+                DC:RefreshAll()
+            end,
+            default = defaults.dpsGraphAutoShowInCombat,
+            width = "full",
+        },
+        {
+            type = "checkbox",
+            name = function()
                 return DC:GetString("menuShowLabelName")
             end,
             tooltip = function()

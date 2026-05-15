@@ -137,9 +137,25 @@ function DC.hud:GetLineHeight()
     return math.max(settings.labelFontSize or 20, settings.valueFontSize or 28) + 8
 end
 
+function DC.hud:GetMetricRowHeight(metricKey)
+    local baseHeight = self:GetLineHeight()
+
+    if metricKey == "dps" and DC.dpsGraph and DC.dpsGraph.GetMiniHeight and DC.dpsGraph.GetMiniGap then
+        return baseHeight + DC.dpsGraph:GetMiniGap() + DC.dpsGraph:GetMiniHeight()
+    end
+
+    return baseHeight
+end
+
 function DC.hud:GetMetricsHeight()
-    local visibleMetricCount = #self:GetVisibleMetricKeys()
-    return self:GetLineHeight() * math.max(1, visibleMetricCount)
+    local visibleMetricKeys = self:GetVisibleMetricKeys()
+    local totalHeight = 0
+
+    for _, metricKey in ipairs(visibleMetricKeys) do
+        totalHeight = totalHeight + self:GetMetricRowHeight(metricKey)
+    end
+
+    return math.max(self:GetLineHeight(), totalHeight)
 end
 
 function DC.hud:GetTopBlockHeight()
@@ -310,6 +326,10 @@ function DC.hud:CreateMetricRow(parent, metricKey)
 
     row.metricKey = metricKey
     row.pulseTimeline = nil
+
+    if metricKey == "dps" and DC.dpsGraph and DC.dpsGraph.AttachMiniSparkline then
+        DC.dpsGraph:AttachMiniSparkline(row)
+    end
 
     self.metricRows[metricKey] = row
 end
@@ -565,12 +585,14 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
     local showLabel = settings.showLabel
     local inlineLayout = self:IsInlineValueLayoutActive()
     local captionWidth = 0
+    local rowHeight = self:GetMetricRowHeight(metricKey)
+    local hasSparkline = metricKey == "dps" and row.sparkline ~= nil
 
     row:SetHidden(false)
     row:ClearAnchors()
     row:SetAnchor(TOPLEFT, self.control.metricsContainer, TOPLEFT, 0, offsetY)
     row:SetAnchor(TOPRIGHT, self.control.metricsContainer, TOPRIGHT, 0, offsetY)
-    row:SetHeight(lineHeight)
+    row:SetHeight(rowHeight)
 
     row.captionLabel:ClearAnchors()
     row.captionLabel:SetAnchor(TOPLEFT, row, TOPLEFT, 0, 0)
@@ -580,7 +602,8 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
 
     row.valueLabel:ClearAnchors()
     row.valueLabel:SetAnchor(TOPLEFT, row.valuePulse, TOPLEFT, 0, 0)
-    row.valueLabel:SetAnchor(BOTTOMRIGHT, row.valuePulse, BOTTOMRIGHT, 0, 0)
+    row.valueLabel:SetAnchor(TOPRIGHT, row.valuePulse, TOPRIGHT, 0, 0)
+    row.valueLabel:SetHeight(lineHeight)
 
     row.valuePulse:ClearAnchors()
     if showLabel then
@@ -598,6 +621,16 @@ function DC.hud:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
     row.captionLabel:SetDimensions(captionWidth, lineHeight)
     row.valuePulse:SetAnchor(TOPLEFT, row, TOPLEFT, captionWidth, 0)
     row.valuePulse:SetAnchor(BOTTOMRIGHT, row, BOTTOMRIGHT, 0, 0)
+
+    if hasSparkline then
+        row.sparkline:SetHidden(false)
+        row.sparkline:ClearAnchors()
+        row.sparkline:SetAnchor(BOTTOMLEFT, row.valuePulse, BOTTOMLEFT, 0, 0)
+        row.sparkline:SetAnchor(BOTTOMRIGHT, row.valuePulse, BOTTOMRIGHT, 0, 0)
+        row.sparkline:SetHeight(DC.dpsGraph:GetMiniHeight())
+    elseif row.sparkline ~= nil then
+        row.sparkline:SetHidden(true)
+    end
 end
 
 function DC.hud:ApplyLayout()
@@ -644,6 +677,7 @@ function DC.hud:ApplyLayout()
         visibleIndexByMetric[metricKey] = index
     end
 
+    local offsetY = 0
     for _, metricKey in ipairs(DC.metricKeys) do
         local row = self.metricRows[metricKey]
         local visibleIndex = visibleIndexByMetric[metricKey]
@@ -651,7 +685,8 @@ function DC.hud:ApplyLayout()
         if visibleIndex == nil then
             row:SetHidden(true)
         else
-            self:ApplyMetricRowLayout(row, metricKey, (visibleIndex - 1) * lineHeight, lineHeight)
+            self:ApplyMetricRowLayout(row, metricKey, offsetY, lineHeight)
+            offsetY = offsetY + self:GetMetricRowHeight(metricKey)
         end
     end
 
@@ -1054,6 +1089,9 @@ function DC.hud:OnCombatTimerStateChanged(isActive)
         self:UpdateCombatTimeDisplay(now)
         self:UpdateCombatTimeAccent(now)
         self:PlayMetricPulse("combatTime", 1.10)
+        if DC.dpsGraph and DC.dpsGraph.OnCombatStateChanged then
+            DC.dpsGraph:OnCombatStateChanged(true)
+        end
         return
     end
 
@@ -1081,6 +1119,10 @@ function DC.hud:OnCombatTimerStateChanged(isActive)
 
     self:UpdateCombatTimeStopAnimation(now)
     self:UpdateCombatTimeAccent(now)
+
+    if DC.dpsGraph and DC.dpsGraph.OnCombatStateChanged then
+        DC.dpsGraph:OnCombatStateChanged(false)
+    end
 end
 
 function DC.hud:OnUpdate(timeMs)
@@ -1090,6 +1132,10 @@ function DC.hud:OnUpdate(timeMs)
     self:UpdateCombatTimeStopAnimation(now)
     self:UpdateCombatTimeDisplay(now)
     self:UpdateCombatTimeAccent(now)
+
+    if DC.dpsGraph and DC.dpsGraph.OnUpdate then
+        DC.dpsGraph:OnUpdate(now)
+    end
 
     if DC.tooltip and DC.tooltip.UpdateHover then
         DC.tooltip:UpdateHover()

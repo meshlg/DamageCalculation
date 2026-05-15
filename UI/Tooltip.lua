@@ -367,7 +367,17 @@ function DC.tooltip:UpdateHover()
         return
     end
 
+    local suppressForDpsGraph = DC.dpsGraph and DC.dpsGraph.ShouldSuppressStatsTooltip and DC.dpsGraph:ShouldSuppressStatsTooltip() or false
+
     if not self:GetSettings().showHud or DC.hud.control:IsHidden() then
+        if self:IsVisible() then
+            self:Hide()
+        end
+
+        return
+    end
+
+    if suppressForDpsGraph then
         if self:IsVisible() then
             self:Hide()
         end
@@ -406,7 +416,7 @@ function DC.tooltip:AttachHandlers()
     end
 
     DC.hud.control:SetHandler("OnMouseEnter", function()
-        self:Show()
+        self:UpdateHover()
     end)
 
     DC.hud.control:SetHandler("OnMouseExit", function()

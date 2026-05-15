@@ -4,6 +4,8 @@ local dpsModeList = { DC.dpsModes.COMPATIBLE, DC.dpsModes.AVERAGE }
 
 DC.dps = {
     refreshIntervalMs = 250,
+    graphSampleIntervalMs = 250,
+    graphMaxSamples = 180,
     initialDisplayDurationMs = 1000,
     recentHitWindowMs = 1500,
     softFreezeWindowMs = 3500,
@@ -23,6 +25,8 @@ DC.dps = {
     lastDamageGapMs = 0,
     cachedSnapshots = {},
     displayStates = {},
+    graphHistories = {},
+    graphLastSampleAtMs = 0,
 }
 
 function DC.dps:GetSettings()
@@ -147,6 +151,82 @@ function DC.dps:ResetDisplayStates()
     end
 end
 
+function DC.dps:CreateEmptyGraphHistories()
+    return {
+        [DC.displayModes.TOTAL] = {},
+        [DC.displayModes.SESSION] = {},
+    }
+end
+
+function DC.dps:ResetGraphHistories()
+    self.graphHistories = self:CreateEmptyGraphHistories()
+    self.graphLastSampleAtMs = 0
+end
+
+function DC.dps:TrimGraphHistory(mode)
+    local history = self.graphHistories and self.graphHistories[mode] or nil
+
+    if history == nil then
+        return
+    end
+
+    local overflow = #history - math.max(30, math.floor(tonumber(self.graphMaxSamples) or 180))
+
+    if overflow <= 0 then
+        return
+    end
+
+    for _ = 1, overflow do
+        table.remove(history, 1)
+    end
+end
+
+function DC.dps:CaptureGraphSampleForMode(mode, now)
+    if self.graphHistories == nil or self.graphHistories[mode] == nil then
+        self:ResetGraphHistories()
+    end
+
+    local currentNow = math.max(0, math.floor(tonumber(now) or 0))
+    local snapshot = self:GetModeSnapshot(mode, currentNow)
+    local history = self.graphHistories[mode]
+
+    table.insert(history, {
+        timestamp = currentNow,
+        averagePlayerDps = snapshot.averagePlayerDps or 0,
+        activePlayerDps = snapshot.activePlayerDps or 0,
+        averageGroupDps = snapshot.averageGroupDps,
+        activeGroupDps = snapshot.activeGroupDps,
+        sharePercent = snapshot.sharePercent,
+        combatDurationMs = snapshot.combatDurationMs or 0,
+    })
+
+    self:TrimGraphHistory(mode)
+end
+
+function DC.dps:UpdateGraphHistories(now, force)
+    local currentNow = math.max(0, math.floor(tonumber(now) or (GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0)))
+
+    if not force and not self:IsEncounterLive() then
+        return
+    end
+
+    if not force and self.graphLastSampleAtMs > 0 and (currentNow - self.graphLastSampleAtMs) < self.graphSampleIntervalMs then
+        return
+    end
+
+    self:CaptureGraphSampleForMode(DC.displayModes.TOTAL, currentNow)
+    self:CaptureGraphSampleForMode(DC.displayModes.SESSION, currentNow)
+    self.graphLastSampleAtMs = currentNow
+end
+
+function DC.dps:GetGraphSamples(mode)
+    if self.graphHistories == nil then
+        self:ResetGraphHistories()
+    end
+
+    return self.graphHistories[mode or DC.displayModes.TOTAL] or self.graphHistories[DC.displayModes.TOTAL]
+end
+
 function DC.dps:ResetLiveSession()
     self.liveSessionPlayerDamage = 0
     self.liveSessionGroupDamage = 0
@@ -157,6 +237,7 @@ function DC.dps:ResetLiveSession()
     self.lastDamageAtMs = 0
     self.lastDamageGapMs = 0
     self:RefreshTrackedGroupUnits()
+    self:ResetGraphHistories()
 
     for _, dpsMode in ipairs(dpsModeList) do
         self:ResetDisplayState(self:GetDisplayStateKey(DC.displayModes.SESSION, dpsMode))
@@ -260,13 +341,16 @@ function DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
 end
 
 function DC.dps:BeginEncounter()
+    local currentNow = GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
     self:RefreshTrackedGroupUnits()
+    self:ResetGraphHistories()
 
     for _, dpsMode in ipairs(dpsModeList) do
         self:ResetDisplayState(self:GetDisplayStateKey(DC.displayModes.SESSION, dpsMode))
     end
 
     self:InvalidateCache()
+    self:UpdateGraphHistories(currentNow, true)
 end
 
 function DC.dps:EndEncounter(combatDurationMs)
@@ -291,6 +375,7 @@ function DC.dps:EndEncounter(combatDurationMs)
     self:ApplyFinalSnapshotToState(DC.displayModes.TOTAL, self:GetStoredModeSnapshot(DC.displayModes.TOTAL), currentNow, false)
     self:ApplyFinalSnapshotToState(DC.displayModes.SESSION, self:GetStoredModeSnapshot(DC.displayModes.SESSION), currentNow, true)
     self:InvalidateCache()
+    self:UpdateGraphHistories(currentNow, true)
 end
 
 function DC.dps:IsEncounterLive()
