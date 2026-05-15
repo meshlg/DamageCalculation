@@ -30,12 +30,14 @@ local INTEGRITY_CHANNELS = {
     integrityShadowSession = IntegrityChannel(105, 110, 116, 101, 103, 114, 105, 116, 121, 83, 104, 97, 100, 111, 119, 83, 101, 115, 115, 105, 111, 110),
 }
 
+local CURRENT_INTEGRITY_CODEC_VERSION = 1
+
 DC.storage = {
     persistNamespace = DC.name .. "Persist",
     persistThrottleMs = 1000,
     defaults = {
         installId = "",
-        integrityCodecVersion = 2,
+        integrityCodecVersion = CURRENT_INTEGRITY_CODEC_VERSION,
         integrityKeyA = "",
         integrityKeyB = "",
         integrityChecksum = "",
@@ -413,12 +415,12 @@ function DC.storage:EnsureIntegritySeed()
         self.sv.integrityKeyB = keyB
     end
 
-    self.sv.integrityCodecVersion = 2
+    self.sv.integrityCodecVersion = CURRENT_INTEGRITY_CODEC_VERSION
     DC.integrity:InitializeRuntimeSeed(self.sv.integrityKeyA, self.sv.integrityKeyB)
 end
 
 function DC.storage:RotateIntegritySeed(forceImmediate)
-    self.sv.integrityCodecVersion = 2
+    self.sv.integrityCodecVersion = CURRENT_INTEGRITY_CODEC_VERSION
     self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
     self:Persist(forceImmediate == true)
 end
@@ -676,7 +678,7 @@ function DC.storage:MarkModified()
     self:ResetAllRuntimeData()
     self.sv.integrityState = DC.integrityStates.MODIFIED
     self.sv.lastIntegrityIssue = GetTimeStamp and GetTimeStamp() or 0
-    self.sv.integrityCodecVersion = 2
+    self.sv.integrityCodecVersion = CURRENT_INTEGRITY_CODEC_VERSION
     self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
     self:Persist(true)
 end
@@ -685,7 +687,7 @@ function DC.storage:ResetTotal(clearModifiedFlag)
     self:ResetAllRuntimeData()
     self.integrityFailureHandled = false
     self.lastIntegritySpotCheckAt = 0
-    self.sv.integrityCodecVersion = 2
+    self.sv.integrityCodecVersion = CURRENT_INTEGRITY_CODEC_VERSION
     self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
 
     if clearModifiedFlag then
@@ -966,7 +968,7 @@ function DC.storage:Initialize()
         self.sv.installId = string.format("%s%s", tostring(installPartA), tostring(installPartB))
     end
 
-    if self.sv.integrityCodecVersion ~= 2 then
+    if self.sv.integrityCodecVersion ~= CURRENT_INTEGRITY_CODEC_VERSION then
         self.sv.integrityState = DC.integrityStates.VERIFIED
         self.sv.lastIntegrityIssue = 0
         self:ResetTotal(false)

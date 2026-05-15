@@ -213,23 +213,33 @@ function DC.combatTracker:ShouldIgnoreStartupCombatState(nextInCombat)
     local ignoreUntilMs = math.max(0, math.floor(tonumber(self.startupCombatStateIgnoreUntilMs) or 0))
 
     if ignoreUntilMs <= 0 then
-        return false
+        return false, nil
     end
 
     local currentNow = self:GetNowMs()
 
     if currentNow > ignoreUntilMs then
         self.startupCombatStateIgnoreUntilMs = 0
-        return false
+        return false, nil
+    end
+
+    local liveInCombat = nextInCombat
+
+    if IsUnitInCombat then
+        liveInCombat = IsUnitInCombat("player") == true
+    end
+
+    if nextInCombat ~= liveInCombat then
+        return true, liveInCombat
     end
 
     if (nextInCombat == true) == (self.startupCombatStateValue == true) then
         self.startupCombatStateIgnoreUntilMs = 0
-        return true
+        return true, liveInCombat
     end
 
     self.startupCombatStateIgnoreUntilMs = 0
-    return false
+    return false, nil
 end
 
 function DC.combatTracker:ResetCombatTimer()
@@ -311,6 +321,29 @@ function DC.combatTracker:ShouldNotifyMetric(includeSession)
     return DC.storage:GetDisplayMode() == DC.displayModes.TOTAL
 end
 
+function DC.combatTracker:IsTrackedDpsDamageEvent(result, sourceType, targetType, sourceUnitId, hitValue)
+    if DC.dps == nil or DC.dps.IsDamageResult == nil or not DC.dps:IsDamageResult(result) then
+        return false
+    end
+
+    if hitValue == nil or hitValue <= 0 then
+        return false
+    end
+
+    if not self:IsValidTarget(targetType) then
+        return false
+    end
+
+    if DC.dps.IsPersonalSource ~= nil and DC.dps:IsPersonalSource(sourceType) then
+        return true
+    end
+
+    return DC.dps.GetCurrentGroupSize ~= nil
+        and DC.dps.IsTrackedGroupSource ~= nil
+        and DC.dps:GetCurrentGroupSize() > 1
+        and DC.dps:IsTrackedGroupSource(sourceType, sourceUnitId)
+end
+
 function DC.combatTracker:NotifyMetric(metricKey, eventInfo, includeSession)
     if self:ShouldNotifyMetric(includeSession) then
         DC:OnMetricAdded(metricKey, eventInfo)
@@ -324,9 +357,10 @@ end
 
 function DC.combatTracker:OnPlayerCombatState(_, inCombat)
     local nextInCombat = inCombat == true
+    local ignoreStartupState, effectiveInCombat = self:ShouldIgnoreStartupCombatState(nextInCombat)
 
-    if self:ShouldIgnoreStartupCombatState(nextInCombat) then
-        self.inCombat = nextInCombat
+    if ignoreStartupState then
+        self.inCombat = effectiveInCombat == true
         return
     end
 
@@ -414,11 +448,13 @@ function DC.combatTracker:OnCombatEvent(_, result, isError, abilityName, ability
         return
     end
 
-    if DC.dps and DC.dps.IsDamageResult and DC.dps:IsDamageResult(result) and not self.encounterActive then
+    local isTrackedDpsDamageEvent = self:IsTrackedDpsDamageEvent(result, sourceType, targetType, sourceUnitId, hitValue)
+
+    if isTrackedDpsDamageEvent and not self.encounterActive then
         self:BeginTrackedEncounter()
     end
 
-    if DC.dps and DC.dps.TrackCombatEvent then
+    if isTrackedDpsDamageEvent and DC.dps and DC.dps.TrackCombatEvent then
         DC.dps:TrackCombatEvent(result, sourceType, sourceUnitId, hitValue)
     end
 
