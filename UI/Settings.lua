@@ -324,7 +324,7 @@ function DC.settings:Initialize()
                 return DC:GetString("menuDpsGraphPointCountTooltip")
             end,
             min = 30,
-            max = 160,
+            max = 120,
             step = 10,
             getFunc = function()
                 return DC.storage:GetSettings().dpsGraphPointCount
