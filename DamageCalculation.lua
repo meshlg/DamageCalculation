@@ -36,6 +36,33 @@ DC.graphModes = {
     ROLLING = "rolling5s",
 }
 
+DC.dpsGraphPointLimits = {
+    min = 30,
+    max = 120,
+    default = 60,
+}
+
+DC.hitThresholds = {
+    strong = 30000,
+    huge = 100000,
+}
+
+function DC:ClampDpsGraphPointCount(value, fallback)
+    local limits = self.dpsGraphPointLimits
+    local safeMin = limits.min
+    local safeMax = limits.max
+    local safeFallback = math.max(safeMin, math.min(safeMax, math.floor(tonumber(fallback) or limits.default)))
+
+    return math.max(safeMin, math.min(safeMax, math.floor(tonumber(value) or safeFallback)))
+end
+
+function DC:GetDpsGraphPointCount()
+    local settings = self.storage and self.storage.sv and self.storage.GetSettings and self.storage:GetSettings() or nil
+    local configuredValue = settings and settings.dpsGraphPointCount or nil
+
+    return self:ClampDpsGraphPointCount(configuredValue, self.dpsGraphPointLimits.default)
+end
+
 DC.fontFaces = {
     MEDIUM = "medium",
     BOLD = "bold",

@@ -3,7 +3,6 @@ local DC = DamageCalculation
 DC.dpsGraph = {
     name = "DamageCalculationDpsGraph",
     miniBarCount = 60,
-    maxLargePointCount = 120,
     miniHeight = 12,
     miniGap = 4,
     minVisualRange = 1500,
@@ -33,6 +32,14 @@ function DC.dpsGraph:ClampColor(value)
     return math.max(0, math.min(1, tonumber(value) or 0))
 end
 
+function DC.dpsGraph:ClampPointCount(value, minCount, maxCount, fallback)
+    local safeMin = math.max(1, math.floor(tonumber(minCount) or 1))
+    local safeMax = math.max(safeMin, math.floor(tonumber(maxCount) or safeMin))
+    local safeFallback = math.max(safeMin, math.min(safeMax, math.floor(tonumber(fallback) or safeMin)))
+
+    return math.max(safeMin, math.min(safeMax, math.floor(tonumber(value) or safeFallback)))
+end
+
 function DC.dpsGraph:IsMiniGraphEnabled()
     return self:GetSettings().showMiniDpsGraph ~= false
 end
@@ -42,11 +49,11 @@ function DC.dpsGraph:IsLargeGraphEnabled()
 end
 
 function DC.dpsGraph:GetLargePointCount()
-    return math.max(30, math.min(self.maxLargePointCount, math.floor(tonumber(self:GetSettings().dpsGraphPointCount) or 60)))
+    return DC:GetDpsGraphPointCount()
 end
 
 function DC.dpsGraph:GetMiniPointCount()
-    local configuredPointCount = math.max(30, math.min(self.maxLargePointCount, math.floor(tonumber(self:GetSettings().dpsGraphPointCount) or 60)))
+    local configuredPointCount = self:GetLargePointCount()
     return math.max(18, math.min(self.miniBarCount, math.floor((configuredPointCount * 0.5) + 0.5)))
 end
 
@@ -165,7 +172,7 @@ function DC.dpsGraph:EnsureMiniColumns(row, targetCount)
         return
     end
 
-    local desiredCount = math.max(1, math.floor(tonumber(targetCount) or self:GetMiniPointCount()))
+    local desiredCount = self:ClampPointCount(targetCount, 1, self.miniBarCount, self:GetMiniPointCount())
     local currentColumns = row.sparkline.columns or {}
 
     if #currentColumns == desiredCount then
@@ -181,7 +188,7 @@ function DC.dpsGraph:EnsureLargeColumns(targetCount)
         return
     end
 
-    local desiredCount = math.max(1, math.floor(tonumber(targetCount) or self:GetLargePointCount()))
+    local desiredCount = self:ClampPointCount(targetCount, DC.dpsGraphPointLimits.min, DC.dpsGraphPointLimits.max, self:GetLargePointCount())
     local currentColumns = self.control.graphColumns or {}
 
     if #currentColumns == desiredCount then
@@ -490,8 +497,8 @@ end
 
 function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
     local rawSeries, meta = self:BuildRawSeries(mode)
-    local pointCount = #rawSeries
-    local bucketCount = math.max(1, math.floor(tonumber(targetCount) or 1))
+    local sampleCount = #rawSeries
+    local bucketCount = self:ClampPointCount(targetCount, 1, DC.dpsGraphPointLimits.max, 1)
     local buckets = {}
     local primaryMin = nil
     local primaryMax = 0
@@ -502,11 +509,12 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
     local previousValue = 0
     local lastSecondaryValue = 0
 
-    if pointCount <= 0 then
+    if sampleCount <= 0 then
         return {
             buckets = buckets,
             meta = meta,
             pointCount = 0,
+            sampleCount = 0,
             primaryMin = 0,
             primaryMax = 0,
             secondaryMin = 0,
@@ -514,6 +522,7 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             lowValue = 0,
             peakValue = 0,
             peakIndex = 1,
+            bucketCount = 0,
             lastValue = 0,
             previousValue = 0,
             lastSecondaryValue = 0,
@@ -548,11 +557,11 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
         end
     end
 
-    lastValue = rawSeries[pointCount].primaryValue or 0
-    lastSecondaryValue = rawSeries[pointCount].secondaryValue or 0
-    previousValue = pointCount > 1 and (rawSeries[pointCount - 1].primaryValue or lastValue) or lastValue
+    lastValue = rawSeries[sampleCount].primaryValue or 0
+    lastSecondaryValue = rawSeries[sampleCount].secondaryValue or 0
+    previousValue = sampleCount > 1 and (rawSeries[sampleCount - 1].primaryValue or lastValue) or lastValue
 
-    if pointCount == 1 then
+    if sampleCount == 1 then
         local singlePoint = rawSeries[1]
         local singlePrimary = math.max(0, math.floor(tonumber(singlePoint and singlePoint.primaryValue) or 0))
         local singleSecondary = math.max(0, math.floor(tonumber(singlePoint and singlePoint.secondaryValue) or 0))
@@ -565,12 +574,12 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
                 secondaryLast = singleSecondary,
             }
         end
-    elseif pointCount < bucketCount then
+    elseif sampleCount < bucketCount then
         for bucketIndex = 1, bucketCount do
             local progress = (bucketIndex - 1) / math.max(1, bucketCount - 1)
-            local samplePosition = 1 + ((pointCount - 1) * progress)
-            local leftIndex = math.max(1, math.min(pointCount, math.floor(samplePosition)))
-            local rightIndex = math.max(leftIndex, math.min(pointCount, math.ceil(samplePosition)))
+            local samplePosition = 1 + ((sampleCount - 1) * progress)
+            local leftIndex = math.max(1, math.min(sampleCount, math.floor(samplePosition)))
+            local rightIndex = math.max(leftIndex, math.min(sampleCount, math.ceil(samplePosition)))
             local lerpT = samplePosition - leftIndex
             local leftPoint = rawSeries[leftIndex]
             local rightPoint = rawSeries[rightIndex]
@@ -589,7 +598,7 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             }
         end
     else
-        local bucketSize = pointCount / bucketCount
+        local bucketSize = sampleCount / bucketCount
 
         for bucketIndex = 1, bucketCount do
             local startIndex = math.floor((bucketIndex - 1) * bucketSize) + 1
@@ -599,8 +608,8 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
             local bucketPrimaryLast = 0
             local bucketSecondaryLast = 0
 
-            startIndex = math.max(1, math.min(pointCount, startIndex))
-            endIndex = math.max(startIndex, math.min(pointCount, endIndex))
+            startIndex = math.max(1, math.min(sampleCount, startIndex))
+            endIndex = math.max(startIndex, math.min(sampleCount, endIndex))
 
             for pointIndex = startIndex, endIndex do
                 local point = rawSeries[pointIndex]
@@ -625,8 +634,8 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
         end
     end
 
-    if pointCount > 1 then
-        local scaledPeakIndex = math.ceil((peakIndex / pointCount) * #buckets)
+    if sampleCount > 1 then
+        local scaledPeakIndex = math.ceil((peakIndex / sampleCount) * #buckets)
         peakIndex = math.max(1, math.min(#buckets, scaledPeakIndex))
     else
         peakIndex = 1
@@ -635,7 +644,8 @@ function DC.dpsGraph:BuildCompressedBuckets(mode, targetCount)
     return {
         buckets = buckets,
         meta = meta,
-        pointCount = pointCount,
+        pointCount = #buckets,
+        sampleCount = sampleCount,
         primaryMin = primaryMin or 0,
         primaryMax = primaryMax,
         secondaryMin = secondaryMin or 0,
@@ -711,7 +721,7 @@ function DC.dpsGraph:UpdatePeakMarker(container, dataset, width, height, visualM
         return
     end
 
-    if math.max(0, math.floor(tonumber(dataset.pointCount) or 0)) < 3 then
+    if math.max(0, math.floor(tonumber(dataset.sampleCount) or 0)) < 3 then
         container.peakMarker:SetHidden(true)
         container.peakLabel:SetHidden(true)
         return
@@ -1085,12 +1095,10 @@ function DC.dpsGraph:UpdateWindowText(now)
         return
     end
 
-    self.control.footerLabel:SetText(string.format("%s: %s | %s | %s: %d | %s: %s-%s",
+    self.control.footerLabel:SetText(string.format("%s: %s | %s | %s: %s-%s",
         DC:GetString("hudCombatTimeLabel"),
         combatTimeText,
         DC:GetString("dpsGraphSamplesLabel", dataset.pointCount or 0),
-        DC:GetString("menuDpsGraphPointCountName"),
-        math.max(0, math.floor(tonumber(dataset.bucketCount) or 0)),
         DC:GetString("dpsGraphRangeLabel"),
         DC.formatter:FormatFull(dataset.lowValue or 0),
         DC.formatter:FormatFull(dataset.peakValue or 0)

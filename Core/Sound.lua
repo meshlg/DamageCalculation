@@ -31,6 +31,11 @@ function DC.sound:GetSettings()
     return DC.storage:GetSettings()
 end
 
+function DC.sound:GetBigHitThreshold()
+    local settings = self:GetSettings()
+    return math.max(0, math.floor(tonumber(settings.bigHitSoundThreshold) or DC.hitThresholds.strong))
+end
+
 function DC.sound:GetChoiceLabels()
     local labels = {}
 
@@ -59,7 +64,7 @@ function DC.sound:GetSoundThrottle(hitInfo)
         return math.max(0, math.floor(throttleMs * 0.5))
     end
 
-    if hitInfo and (tonumber(hitInfo.amount) or 0) >= (settings.bigHitSoundThreshold or 30000) then
+    if hitInfo and (tonumber(hitInfo.amount) or 0) >= self:GetBigHitThreshold() then
         return math.max(0, math.floor(throttleMs * 0.75))
     end
 
@@ -86,7 +91,7 @@ function DC.sound:GetSoundIdForHit(hitInfo)
         return settings.critHitSoundId or ""
     end
 
-    if amount >= (settings.bigHitSoundThreshold or 30000) then
+    if amount >= self:GetBigHitThreshold() then
         return settings.bigHitSoundId or ""
     end
 
@@ -112,11 +117,17 @@ function DC.sound:PlayForHit(hitInfo)
         return
     end
 
+    local soundId = self:GetSoundIdForHit(hitInfo)
+
+    if soundId == nil or soundId == "" then
+        return
+    end
+
     if not self:CanPlay(hitInfo) then
         return
     end
 
-    self:PlaySoundId(self:GetSoundIdForHit(hitInfo))
+    self:PlaySoundId(soundId)
 end
 
 function DC.sound:PreviewSequence()

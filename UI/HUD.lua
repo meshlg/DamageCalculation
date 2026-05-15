@@ -921,10 +921,10 @@ function DC.hud:GetPopupStyle(amount, isCritical)
     local scaleMultiplier = 1.02
     local color = { 0.97, 0.97, 0.97, 1.0 }
 
-    if amount >= 100000 then
+    if amount >= DC.hitThresholds.huge then
         scaleMultiplier = 1.35
         color = { 1.0, 0.74, 0.26, 1.0 }
-    elseif amount >= 30000 then
+    elseif amount >= DC.hitThresholds.strong then
         scaleMultiplier = 1.18
         color = { 0.98, 0.88, 0.46, 1.0 }
     end

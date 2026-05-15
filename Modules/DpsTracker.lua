@@ -5,7 +5,6 @@ local dpsModeList = { DC.dpsModes.COMPATIBLE, DC.dpsModes.AVERAGE }
 DC.dps = {
     refreshIntervalMs = 250,
     graphSampleIntervalMs = 250,
-    graphMaxSamples = 260,
     initialDisplayDurationMs = 1000,
     recentHitWindowMs = 1500,
     softFreezeWindowMs = 3500,
@@ -163,6 +162,14 @@ function DC.dps:ResetGraphHistories()
     self.graphLastSampleAtMs = 0
 end
 
+function DC.dps:GetGraphHistoryLimit()
+    if DC.GetDpsGraphPointCount then
+        return DC:GetDpsGraphPointCount()
+    end
+
+    return DC.dpsGraphPointLimits.default
+end
+
 function DC.dps:TrimGraphHistory(mode)
     local history = self.graphHistories and self.graphHistories[mode] or nil
 
@@ -170,7 +177,7 @@ function DC.dps:TrimGraphHistory(mode)
         return
     end
 
-    local overflow = #history - math.max(30, math.floor(tonumber(self.graphMaxSamples) or 180))
+    local overflow = #history - self:GetGraphHistoryLimit()
 
     if overflow <= 0 then
         return
@@ -178,6 +185,12 @@ function DC.dps:TrimGraphHistory(mode)
 
     for _ = 1, overflow do
         table.remove(history, 1)
+    end
+end
+
+function DC.dps:TrimAllGraphHistories()
+    for _, mode in ipairs(displayModeList) do
+        self:TrimGraphHistory(mode)
     end
 end
 

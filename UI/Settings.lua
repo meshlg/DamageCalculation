@@ -323,14 +323,19 @@ function DC.settings:Initialize()
             tooltip = function()
                 return DC:GetString("menuDpsGraphPointCountTooltip")
             end,
-            min = 30,
-            max = 120,
+            min = DC.dpsGraphPointLimits.min,
+            max = DC.dpsGraphPointLimits.max,
             step = 10,
             getFunc = function()
-                return DC.storage:GetSettings().dpsGraphPointCount
+                return DC:GetDpsGraphPointCount()
             end,
             setFunc = function(value)
-                DC.storage:SetSetting("dpsGraphPointCount", value)
+                DC.storage:SetSetting("dpsGraphPointCount", DC:ClampDpsGraphPointCount(value))
+
+                if DC.dps and DC.dps.TrimAllGraphHistories then
+                    DC.dps:TrimAllGraphHistories()
+                end
+
                 DC:RefreshAll()
             end,
             default = defaults.dpsGraphPointCount,
@@ -1029,7 +1034,7 @@ function DC.settings:Initialize()
                 return DC:GetString("menuBigHitThresholdTooltip")
             end,
             min = 10000,
-            max = 100000,
+            max = DC.hitThresholds.huge,
             step = 1000,
             getFunc = function()
                 return DC.storage:GetSettings().bigHitSoundThreshold

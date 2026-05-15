@@ -40,7 +40,7 @@ DC.storage = {
             dpsGraphMode = DC.graphModes.TREND,
             showMiniDpsGraph = true,
             showLargeDpsGraph = true,
-            dpsGraphPointCount = 60,
+            dpsGraphPointCount = DC.dpsGraphPointLimits.default,
             language = DC.languageModes.AUTO,
             showDamageMetric = true,
             showBlockedMetric = true,
@@ -82,7 +82,7 @@ DC.storage = {
             normalHitSoundId = "Lock_Value",
             bigHitSoundId = "Click_RandomizeButton",
             critHitSoundId = "weapon_swap_fail",
-            bigHitSoundThreshold = 30000,
+            bigHitSoundThreshold = DC.hitThresholds.strong,
             soundThrottleMs = 80,
             popupAnchor = "left",
             popupOffsetY = -4,
@@ -171,6 +171,8 @@ function DC.storage:EnsureSettings()
     if self.sv.settings.showLargeDpsGraph == false then
         self.sv.settings.dpsGraphAutoShowInCombat = false
     end
+
+    self.sv.settings.dpsGraphPointCount = DC:ClampDpsGraphPointCount(self.sv.settings.dpsGraphPointCount)
 end
 
 function DC.storage:GetSettings()
