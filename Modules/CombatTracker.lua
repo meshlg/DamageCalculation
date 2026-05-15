@@ -17,6 +17,8 @@ DC.combatTracker = {
     bossUnitsById = {},
     bossNames = {},
     maxBossUnitTags = 6,
+    startupCombatStateValue = false,
+    startupCombatStateIgnoreUntilMs = 0,
 }
 
 function DC.combatTracker:IsValidSource(sourceType)
@@ -207,6 +209,29 @@ function DC.combatTracker:GetNowMs()
     return GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
 end
 
+function DC.combatTracker:ShouldIgnoreStartupCombatState(nextInCombat)
+    local ignoreUntilMs = math.max(0, math.floor(tonumber(self.startupCombatStateIgnoreUntilMs) or 0))
+
+    if ignoreUntilMs <= 0 then
+        return false
+    end
+
+    local currentNow = self:GetNowMs()
+
+    if currentNow > ignoreUntilMs then
+        self.startupCombatStateIgnoreUntilMs = 0
+        return false
+    end
+
+    if (nextInCombat == true) == (self.startupCombatStateValue == true) then
+        self.startupCombatStateIgnoreUntilMs = 0
+        return true
+    end
+
+    self.startupCombatStateIgnoreUntilMs = 0
+    return false
+end
+
 function DC.combatTracker:ResetCombatTimer()
     self.storedCombatDurationMs = 0
 
@@ -298,8 +323,15 @@ function DC.combatTracker:NotifyMetric(metricKey, eventInfo, includeSession)
 end
 
 function DC.combatTracker:OnPlayerCombatState(_, inCombat)
+    local nextInCombat = inCombat == true
+
+    if self:ShouldIgnoreStartupCombatState(nextInCombat) then
+        self.inCombat = nextInCombat
+        return
+    end
+
     local wasInCombat = self.inCombat == true
-    self.inCombat = inCombat == true
+    self.inCombat = nextInCombat
 
     if self.inCombat and not wasInCombat and not self.encounterActive then
         self:BeginTrackedEncounter()
@@ -451,7 +483,9 @@ function DC.combatTracker:StartCombatStateTracking()
     end
 
     self.combatStateTracking = true
-    self.inCombat = IsUnitInCombat and IsUnitInCombat("player") == true or false
+    self.startupCombatStateValue = IsUnitInCombat and IsUnitInCombat("player") == true or false
+    self.startupCombatStateIgnoreUntilMs = self:GetNowMs() + 2000
+    self.inCombat = false
 
     EVENT_MANAGER:RegisterForEvent(self.combatStateNamespace, EVENT_PLAYER_COMBAT_STATE, function(...)
         self:OnPlayerCombatState(...)

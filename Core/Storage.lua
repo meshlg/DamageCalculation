@@ -1,12 +1,45 @@
 local DC = DamageCalculation
 
+local function IntegrityChannel(...)
+    return string.char(...)
+end
+
+local INTEGRITY_CHANNELS = {
+    damage = IntegrityChannel(100, 97, 109, 97, 103, 101),
+    blocked = IntegrityChannel(98, 108, 111, 99, 107, 101, 100),
+    healed = IntegrityChannel(104, 101, 97, 108, 101, 100),
+    received = IntegrityChannel(114, 101, 99, 101, 105, 118, 101, 100),
+    totalPlayerDamage = IntegrityChannel(116, 111, 116, 97, 108, 80, 108, 97, 121, 101, 114, 68, 97, 109, 97, 103, 101),
+    totalGroupDamage = IntegrityChannel(116, 111, 116, 97, 108, 71, 114, 111, 117, 112, 68, 97, 109, 97, 103, 101),
+    totalCombatDuration = IntegrityChannel(116, 111, 116, 97, 108, 67, 111, 109, 98, 97, 116, 68, 117, 114, 97, 116, 105, 111, 110),
+    totalActiveCombatDuration = IntegrityChannel(116, 111, 116, 97, 108, 65, 99, 116, 105, 118, 101, 67, 111, 109, 98, 97, 116, 68, 117, 114, 97, 116, 105, 111, 110),
+    sessionDamage = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 68, 97, 109, 97, 103, 101),
+    sessionBlocked = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 66, 108, 111, 99, 107, 101, 100),
+    sessionHealed = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 72, 101, 97, 108, 101, 100),
+    sessionReceived = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 82, 101, 99, 101, 105, 118, 101, 100),
+    sessionPlayerDamage = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 80, 108, 97, 121, 101, 114, 68, 97, 109, 97, 103, 101),
+    sessionGroupDamage = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 71, 114, 111, 117, 112, 68, 97, 109, 97, 103, 101),
+    sessionCombatDuration = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 67, 111, 109, 98, 97, 116, 68, 117, 114, 97, 116, 105, 111, 110),
+    sessionActiveCombatDuration = IntegrityChannel(115, 101, 115, 115, 105, 111, 110, 65, 99, 116, 105, 118, 101, 67, 111, 109, 98, 97, 116, 68, 117, 114, 97, 116, 105, 111, 110),
+    pveKills = IntegrityChannel(112, 118, 101, 75, 105, 108, 108, 115),
+    pveBossKills = IntegrityChannel(112, 118, 101, 66, 111, 115, 115, 75, 105, 108, 108, 115),
+    pvpKills = IntegrityChannel(112, 118, 112, 75, 105, 108, 108, 115),
+    hits = IntegrityChannel(104, 105, 116, 115),
+    integrityCanary = IntegrityChannel(105, 110, 116, 101, 103, 114, 105, 116, 121, 67, 97, 110, 97, 114, 121),
+    integrityShadowTotal = IntegrityChannel(105, 110, 116, 101, 103, 114, 105, 116, 121, 83, 104, 97, 100, 111, 119, 84, 111, 116, 97, 108),
+    integrityShadowSession = IntegrityChannel(105, 110, 116, 101, 103, 114, 105, 116, 121, 83, 104, 97, 100, 111, 119, 83, 101, 115, 115, 105, 111, 110),
+}
+
 DC.storage = {
     persistNamespace = DC.name .. "Persist",
     persistThrottleMs = 1000,
     defaults = {
         installId = "",
-        integritySalt = "",
+        integrityCodecVersion = 2,
+        integrityKeyA = "",
+        integrityKeyB = "",
         integrityChecksum = "",
+        integrityChecksumSecondary = "",
         integrityState = DC.integrityStates.VERIFIED,
         lastIntegrityIssue = 0,
         totalDamageEncoded = "",
@@ -25,6 +58,9 @@ DC.storage = {
         sessionGroupDamageEncoded = "",
         sessionCombatDurationEncoded = "",
         sessionActiveCombatDurationEncoded = "",
+        integrityCanaryEncoded = "",
+        integrityShadowTotalEncoded = "",
+        integrityShadowSessionEncoded = "",
         totalPveKillsEncoded = "",
         totalPveBossKillsEncoded = "",
         totalPvpKillsEncoded = "",
@@ -116,6 +152,9 @@ DC.storage = {
     persistQueued = false,
     persistRegistered = false,
     lastPersistAt = 0,
+    integritySpotCheckIntervalMs = 4000,
+    lastIntegritySpotCheckAt = 0,
+    integrityFailureHandled = false,
 }
 
 function DC.storage:CreateEmptyStats()
@@ -208,7 +247,12 @@ end
 function DC.storage:BuildIntegrityPayload()
     local payload = {
         tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
+        tostring(self.sv.integrityCodecVersion or 0),
+        tostring(self.sv.integrityKeyA or ""),
+        tostring(self.sv.integrityKeyB or ""),
+        tostring(self.sv.integrityCanaryEncoded or ""),
+        tostring(self.sv.integrityShadowTotalEncoded or ""),
+        tostring(self.sv.integrityShadowSessionEncoded or ""),
         tostring(self.sv.totalDamageEncoded or ""),
         tostring(self.sv.totalBlockedEncoded or ""),
         tostring(self.sv.totalHealedEncoded or ""),
@@ -235,161 +279,179 @@ function DC.storage:BuildIntegrityPayload()
     return table.concat(payload, "|")
 end
 
-function DC.storage:BuildPreSessionIntegrityPayload()
+function DC.storage:BuildIntegritySecondaryPayload()
     local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalReceivedEncoded or ""),
-        tostring(self.sv.totalPveKillsEncoded or ""),
-        tostring(self.sv.totalPveBossKillsEncoded or ""),
-        tostring(self.sv.totalPvpKillsEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
+        "DamageCalculation::Secondary",
         tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildPreDpsIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalReceivedEncoded or ""),
-        tostring(self.sv.sessionDamageEncoded or ""),
-        tostring(self.sv.sessionBlockedEncoded or ""),
-        tostring(self.sv.sessionHealedEncoded or ""),
-        tostring(self.sv.sessionReceivedEncoded or ""),
-        tostring(self.sv.totalPveKillsEncoded or ""),
-        tostring(self.sv.totalPveBossKillsEncoded or ""),
-        tostring(self.sv.totalPvpKillsEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildPreActiveDpsIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalReceivedEncoded or ""),
-        tostring(self.sv.totalPlayerDamageEncoded or ""),
-        tostring(self.sv.totalGroupDamageEncoded or ""),
-        tostring(self.sv.totalCombatDurationEncoded or ""),
-        tostring(self.sv.sessionDamageEncoded or ""),
-        tostring(self.sv.sessionBlockedEncoded or ""),
-        tostring(self.sv.sessionHealedEncoded or ""),
-        tostring(self.sv.sessionReceivedEncoded or ""),
-        tostring(self.sv.sessionPlayerDamageEncoded or ""),
-        tostring(self.sv.sessionGroupDamageEncoded or ""),
+        tostring(self.sv.integrityShadowSessionEncoded or ""),
+        tostring(self.sv.sessionActiveCombatDurationEncoded or ""),
         tostring(self.sv.sessionCombatDurationEncoded or ""),
-        tostring(self.sv.totalPveKillsEncoded or ""),
+        tostring(self.sv.sessionGroupDamageEncoded or ""),
+        tostring(self.sv.sessionPlayerDamageEncoded or ""),
+        tostring(self.sv.sessionReceivedEncoded or ""),
+        tostring(self.sv.sessionHealedEncoded or ""),
+        tostring(self.sv.sessionBlockedEncoded or ""),
+        tostring(self.sv.sessionDamageEncoded or ""),
+        tostring(self.sv.totalHitsEncoded or ""),
+        tostring(self.sv.totalPvpKillsEncoded or ""),
         tostring(self.sv.totalPveBossKillsEncoded or ""),
-        tostring(self.sv.totalPvpKillsEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildLegacyIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildThreeMetricIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildFourMetricIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalReceivedEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
-    }
-
-    return table.concat(payload, "|")
-end
-
-function DC.storage:BuildKillMetricIntegrityPayload()
-    local payload = {
-        tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
-        tostring(self.sv.totalDamageEncoded or ""),
-        tostring(self.sv.totalBlockedEncoded or ""),
-        tostring(self.sv.totalHealedEncoded or ""),
-        tostring(self.sv.totalReceivedEncoded or ""),
         tostring(self.sv.totalPveKillsEncoded or ""),
-        tostring(self.sv.totalPvpKillsEncoded or ""),
-        tostring(self.sv.totalHitsEncoded or ""),
-        tostring(DC.savedVariableVersion),
+        tostring(self.sv.totalActiveCombatDurationEncoded or ""),
+        tostring(self.sv.totalCombatDurationEncoded or ""),
+        tostring(self.sv.totalGroupDamageEncoded or ""),
+        tostring(self.sv.totalPlayerDamageEncoded or ""),
+        tostring(self.sv.totalReceivedEncoded or ""),
+        tostring(self.sv.totalHealedEncoded or ""),
+        tostring(self.sv.totalBlockedEncoded or ""),
+        tostring(self.sv.totalDamageEncoded or ""),
+        tostring(self.sv.integrityShadowTotalEncoded or ""),
+        tostring(self.sv.integrityCanaryEncoded or ""),
+        tostring(self.sv.integrityKeyB or ""),
+        tostring(self.sv.installId or ""),
+        tostring(self.sv.integrityKeyA or ""),
+        tostring(self.sv.integrityCodecVersion or 0),
     }
 
+    return table.concat(payload, "#")
+end
+
+function DC.storage:BuildCurrentIntegritySnapshot()
+    self:EnsureStatTables()
+
+    return {
+        totalDamage = self.totalStats.damage or 0,
+        totalBlocked = self.totalStats.blocked or 0,
+        totalHealed = self.totalStats.healed or 0,
+        totalReceived = self.totalStats.received or 0,
+        totalPlayerDamage = self.totalPlayerDamage or 0,
+        totalGroupDamage = self.totalGroupDamage or 0,
+        totalCombatDurationMs = self.totalCombatDurationMs or 0,
+        totalActiveCombatDurationMs = self.totalActiveCombatDurationMs or 0,
+        sessionDamage = self.sessionStats.damage or 0,
+        sessionBlocked = self.sessionStats.blocked or 0,
+        sessionHealed = self.sessionStats.healed or 0,
+        sessionReceived = self.sessionStats.received or 0,
+        sessionPlayerDamage = self.sessionPlayerDamage or 0,
+        sessionGroupDamage = self.sessionGroupDamage or 0,
+        sessionCombatDurationMs = self.sessionCombatDurationMs or 0,
+        sessionActiveCombatDurationMs = self.sessionActiveCombatDurationMs or 0,
+        totalPveKills = self.totalPveKills or 0,
+        totalPveBossKills = self.totalPveBossKills or 0,
+        totalPvpKills = self.totalPvpKills or 0,
+        totalHits = self.totalHits or 0,
+    }
+end
+
+function DC.storage:BuildShadowPayload(scope, snapshot)
+    local payload
+
+    if scope == "session" then
+        payload = {
+            "session",
+            tostring(self.sv.installId or ""),
+            tostring(snapshot.sessionDamage or 0),
+            tostring(snapshot.sessionBlocked or 0),
+            tostring(snapshot.sessionHealed or 0),
+            tostring(snapshot.sessionReceived or 0),
+            tostring(snapshot.sessionPlayerDamage or 0),
+            tostring(snapshot.sessionGroupDamage or 0),
+            tostring(snapshot.sessionCombatDurationMs or 0),
+            tostring(snapshot.sessionActiveCombatDurationMs or 0),
+            tostring(DC.savedVariableVersion),
+        }
+    else
+        payload = {
+            "total",
+            tostring(self.sv.installId or ""),
+            tostring(snapshot.totalDamage or 0),
+            tostring(snapshot.totalBlocked or 0),
+            tostring(snapshot.totalHealed or 0),
+            tostring(snapshot.totalReceived or 0),
+            tostring(snapshot.totalPlayerDamage or 0),
+            tostring(snapshot.totalGroupDamage or 0),
+            tostring(snapshot.totalCombatDurationMs or 0),
+            tostring(snapshot.totalActiveCombatDurationMs or 0),
+            tostring(snapshot.totalPveKills or 0),
+            tostring(snapshot.totalPveBossKills or 0),
+            tostring(snapshot.totalPvpKills or 0),
+            tostring(snapshot.totalHits or 0),
+            tostring(DC.savedVariableVersion),
+        }
+    end
+
     return table.concat(payload, "|")
+end
+
+function DC.storage:GetExpectedIntegrityCanary()
+    local payload = table.concat({
+        tostring(self.sv.installId or ""),
+        tostring(self.sv.integrityCodecVersion or 0),
+        tostring(self.sv.integrityKeyA or ""),
+        tostring(self.sv.integrityKeyB or ""),
+        tostring(DC.savedVariableVersion),
+        "DamageCalculation::Canary",
+    }, "|")
+
+    return DC.integrity:ChecksumToUint32(payload, true)
+end
+
+function DC.storage:GetExpectedIntegrityShadowTotal(snapshot)
+    return DC.integrity:ChecksumToUint32(self:BuildShadowPayload("total", snapshot), false)
+end
+
+function DC.storage:GetExpectedIntegrityShadowSession(snapshot)
+    return DC.integrity:ChecksumToUint32(self:BuildShadowPayload("session", snapshot), true)
+end
+
+function DC.storage:EnsureIntegritySeed()
+    local keyA = self.sv.integrityKeyA
+    local keyB = self.sv.integrityKeyB
+
+    if keyA == nil or keyA == "" or keyB == nil or keyB == "" then
+        keyA, keyB = DC.integrity:GenerateSeedParts()
+        self.sv.integrityKeyA = keyA
+        self.sv.integrityKeyB = keyB
+    end
+
+    self.sv.integrityCodecVersion = 2
+    DC.integrity:InitializeRuntimeSeed(self.sv.integrityKeyA, self.sv.integrityKeyB)
+end
+
+function DC.storage:RotateIntegritySeed(forceImmediate)
+    self.sv.integrityCodecVersion = 2
+    self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
+    self:Persist(forceImmediate == true)
 end
 
 function DC.storage:PersistNow()
-    local salt = self.sv.integritySalt
+    self:EnsureIntegritySeed()
+    local snapshot = self:BuildCurrentIntegritySnapshot()
 
-    if salt == nil or salt == "" then
-        salt = DC.integrity:GenerateSalt()
-        self.sv.integritySalt = salt
-    end
-
-    self.sv.totalDamageEncoded = DC.integrity:EncodeNumber(self.totalStats.damage, salt, "damage")
-    self.sv.totalBlockedEncoded = DC.integrity:EncodeNumber(self.totalStats.blocked, salt, "blocked")
-    self.sv.totalHealedEncoded = DC.integrity:EncodeNumber(self.totalStats.healed, salt, "healed")
-    self.sv.totalReceivedEncoded = DC.integrity:EncodeNumber(self.totalStats.received, salt, "received")
-    self.sv.totalPlayerDamageEncoded = DC.integrity:EncodeNumber(self.totalPlayerDamage, salt, "totalPlayerDamage")
-    self.sv.totalGroupDamageEncoded = DC.integrity:EncodeNumber(self.totalGroupDamage, salt, "totalGroupDamage")
-    self.sv.totalCombatDurationEncoded = DC.integrity:EncodeNumber(self.totalCombatDurationMs, salt, "totalCombatDuration")
-    self.sv.totalActiveCombatDurationEncoded = DC.integrity:EncodeNumber(self.totalActiveCombatDurationMs, salt, "totalActiveCombatDuration")
-    self.sv.sessionDamageEncoded = DC.integrity:EncodeNumber(self.sessionStats.damage, salt, "sessionDamage")
-    self.sv.sessionBlockedEncoded = DC.integrity:EncodeNumber(self.sessionStats.blocked, salt, "sessionBlocked")
-    self.sv.sessionHealedEncoded = DC.integrity:EncodeNumber(self.sessionStats.healed, salt, "sessionHealed")
-    self.sv.sessionReceivedEncoded = DC.integrity:EncodeNumber(self.sessionStats.received, salt, "sessionReceived")
-    self.sv.sessionPlayerDamageEncoded = DC.integrity:EncodeNumber(self.sessionPlayerDamage, salt, "sessionPlayerDamage")
-    self.sv.sessionGroupDamageEncoded = DC.integrity:EncodeNumber(self.sessionGroupDamage, salt, "sessionGroupDamage")
-    self.sv.sessionCombatDurationEncoded = DC.integrity:EncodeNumber(self.sessionCombatDurationMs, salt, "sessionCombatDuration")
-    self.sv.sessionActiveCombatDurationEncoded = DC.integrity:EncodeNumber(self.sessionActiveCombatDurationMs, salt, "sessionActiveCombatDuration")
-    self.sv.totalPveKillsEncoded = DC.integrity:EncodeNumber(self.totalPveKills, salt, "pveKills")
-    self.sv.totalPveBossKillsEncoded = DC.integrity:EncodeNumber(self.totalPveBossKills, salt, "pveBossKills")
-    self.sv.totalPvpKillsEncoded = DC.integrity:EncodeNumber(self.totalPvpKills, salt, "pvpKills")
-    self.sv.totalHitsEncoded = DC.integrity:EncodeNumber(self.totalHits, salt, "hits")
+    self.sv.totalDamageEncoded = DC.integrity:EncodeNumber(snapshot.totalDamage, INTEGRITY_CHANNELS.damage)
+    self.sv.totalBlockedEncoded = DC.integrity:EncodeNumber(snapshot.totalBlocked, INTEGRITY_CHANNELS.blocked)
+    self.sv.totalHealedEncoded = DC.integrity:EncodeNumber(snapshot.totalHealed, INTEGRITY_CHANNELS.healed)
+    self.sv.totalReceivedEncoded = DC.integrity:EncodeNumber(snapshot.totalReceived, INTEGRITY_CHANNELS.received)
+    self.sv.totalPlayerDamageEncoded = DC.integrity:EncodeNumber(snapshot.totalPlayerDamage, INTEGRITY_CHANNELS.totalPlayerDamage)
+    self.sv.totalGroupDamageEncoded = DC.integrity:EncodeNumber(snapshot.totalGroupDamage, INTEGRITY_CHANNELS.totalGroupDamage)
+    self.sv.totalCombatDurationEncoded = DC.integrity:EncodeNumber(snapshot.totalCombatDurationMs, INTEGRITY_CHANNELS.totalCombatDuration)
+    self.sv.totalActiveCombatDurationEncoded = DC.integrity:EncodeNumber(snapshot.totalActiveCombatDurationMs, INTEGRITY_CHANNELS.totalActiveCombatDuration)
+    self.sv.sessionDamageEncoded = DC.integrity:EncodeNumber(snapshot.sessionDamage, INTEGRITY_CHANNELS.sessionDamage)
+    self.sv.sessionBlockedEncoded = DC.integrity:EncodeNumber(snapshot.sessionBlocked, INTEGRITY_CHANNELS.sessionBlocked)
+    self.sv.sessionHealedEncoded = DC.integrity:EncodeNumber(snapshot.sessionHealed, INTEGRITY_CHANNELS.sessionHealed)
+    self.sv.sessionReceivedEncoded = DC.integrity:EncodeNumber(snapshot.sessionReceived, INTEGRITY_CHANNELS.sessionReceived)
+    self.sv.sessionPlayerDamageEncoded = DC.integrity:EncodeNumber(snapshot.sessionPlayerDamage, INTEGRITY_CHANNELS.sessionPlayerDamage)
+    self.sv.sessionGroupDamageEncoded = DC.integrity:EncodeNumber(snapshot.sessionGroupDamage, INTEGRITY_CHANNELS.sessionGroupDamage)
+    self.sv.sessionCombatDurationEncoded = DC.integrity:EncodeNumber(snapshot.sessionCombatDurationMs, INTEGRITY_CHANNELS.sessionCombatDuration)
+    self.sv.sessionActiveCombatDurationEncoded = DC.integrity:EncodeNumber(snapshot.sessionActiveCombatDurationMs, INTEGRITY_CHANNELS.sessionActiveCombatDuration)
+    self.sv.totalPveKillsEncoded = DC.integrity:EncodeNumber(snapshot.totalPveKills, INTEGRITY_CHANNELS.pveKills)
+    self.sv.totalPveBossKillsEncoded = DC.integrity:EncodeNumber(snapshot.totalPveBossKills, INTEGRITY_CHANNELS.pveBossKills)
+    self.sv.totalPvpKillsEncoded = DC.integrity:EncodeNumber(snapshot.totalPvpKills, INTEGRITY_CHANNELS.pvpKills)
+    self.sv.totalHitsEncoded = DC.integrity:EncodeNumber(snapshot.totalHits, INTEGRITY_CHANNELS.hits)
+    self.sv.integrityCanaryEncoded = DC.integrity:EncodeNumber(self:GetExpectedIntegrityCanary(), INTEGRITY_CHANNELS.integrityCanary)
+    self.sv.integrityShadowTotalEncoded = DC.integrity:EncodeNumber(self:GetExpectedIntegrityShadowTotal(snapshot), INTEGRITY_CHANNELS.integrityShadowTotal)
+    self.sv.integrityShadowSessionEncoded = DC.integrity:EncodeNumber(self:GetExpectedIntegrityShadowSession(snapshot), INTEGRITY_CHANNELS.integrityShadowSession)
     self.sv.integrityChecksum = DC.integrity:Checksum(self:BuildIntegrityPayload())
+    self.sv.integrityChecksumSecondary = DC.integrity:Checksum(self:BuildIntegritySecondaryPayload())
     self.lastPersistAt = GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
     self.persistQueued = false
 end
@@ -462,17 +524,169 @@ function DC.storage:ResetAllRuntimeData()
     end
 end
 
+function DC.storage:DecodePersistedIntegritySnapshot()
+    return {
+        totalDamage = DC.integrity:DecodeNumber(self.sv.totalDamageEncoded, INTEGRITY_CHANNELS.damage),
+        totalBlocked = DC.integrity:DecodeNumber(self.sv.totalBlockedEncoded, INTEGRITY_CHANNELS.blocked),
+        totalHealed = DC.integrity:DecodeNumber(self.sv.totalHealedEncoded, INTEGRITY_CHANNELS.healed),
+        totalReceived = DC.integrity:DecodeNumber(self.sv.totalReceivedEncoded, INTEGRITY_CHANNELS.received),
+        totalPlayerDamage = DC.integrity:DecodeNumber(self.sv.totalPlayerDamageEncoded, INTEGRITY_CHANNELS.totalPlayerDamage),
+        totalGroupDamage = DC.integrity:DecodeNumber(self.sv.totalGroupDamageEncoded, INTEGRITY_CHANNELS.totalGroupDamage),
+        totalCombatDurationMs = DC.integrity:DecodeNumber(self.sv.totalCombatDurationEncoded, INTEGRITY_CHANNELS.totalCombatDuration),
+        totalActiveCombatDurationMs = DC.integrity:DecodeNumber(self.sv.totalActiveCombatDurationEncoded, INTEGRITY_CHANNELS.totalActiveCombatDuration),
+        sessionDamage = DC.integrity:DecodeNumber(self.sv.sessionDamageEncoded, INTEGRITY_CHANNELS.sessionDamage),
+        sessionBlocked = DC.integrity:DecodeNumber(self.sv.sessionBlockedEncoded, INTEGRITY_CHANNELS.sessionBlocked),
+        sessionHealed = DC.integrity:DecodeNumber(self.sv.sessionHealedEncoded, INTEGRITY_CHANNELS.sessionHealed),
+        sessionReceived = DC.integrity:DecodeNumber(self.sv.sessionReceivedEncoded, INTEGRITY_CHANNELS.sessionReceived),
+        sessionPlayerDamage = DC.integrity:DecodeNumber(self.sv.sessionPlayerDamageEncoded, INTEGRITY_CHANNELS.sessionPlayerDamage),
+        sessionGroupDamage = DC.integrity:DecodeNumber(self.sv.sessionGroupDamageEncoded, INTEGRITY_CHANNELS.sessionGroupDamage),
+        sessionCombatDurationMs = DC.integrity:DecodeNumber(self.sv.sessionCombatDurationEncoded, INTEGRITY_CHANNELS.sessionCombatDuration),
+        sessionActiveCombatDurationMs = DC.integrity:DecodeNumber(self.sv.sessionActiveCombatDurationEncoded, INTEGRITY_CHANNELS.sessionActiveCombatDuration),
+        totalPveKills = DC.integrity:DecodeNumber(self.sv.totalPveKillsEncoded, INTEGRITY_CHANNELS.pveKills),
+        totalPveBossKills = DC.integrity:DecodeNumber(self.sv.totalPveBossKillsEncoded, INTEGRITY_CHANNELS.pveBossKills),
+        totalPvpKills = DC.integrity:DecodeNumber(self.sv.totalPvpKillsEncoded, INTEGRITY_CHANNELS.pvpKills),
+        totalHits = DC.integrity:DecodeNumber(self.sv.totalHitsEncoded, INTEGRITY_CHANNELS.hits),
+        canary = DC.integrity:DecodeNumber(self.sv.integrityCanaryEncoded, INTEGRITY_CHANNELS.integrityCanary),
+        shadowTotal = DC.integrity:DecodeNumber(self.sv.integrityShadowTotalEncoded, INTEGRITY_CHANNELS.integrityShadowTotal),
+        shadowSession = DC.integrity:DecodeNumber(self.sv.integrityShadowSessionEncoded, INTEGRITY_CHANNELS.integrityShadowSession),
+    }
+end
+
+function DC.storage:IsDecodedIntegritySnapshotValid(snapshot)
+    if snapshot == nil then
+        return false
+    end
+
+    local requiredKeys = {
+        "totalDamage",
+        "totalBlocked",
+        "totalHealed",
+        "totalReceived",
+        "totalPlayerDamage",
+        "totalGroupDamage",
+        "totalCombatDurationMs",
+        "totalActiveCombatDurationMs",
+        "sessionDamage",
+        "sessionBlocked",
+        "sessionHealed",
+        "sessionReceived",
+        "sessionPlayerDamage",
+        "sessionGroupDamage",
+        "sessionCombatDurationMs",
+        "sessionActiveCombatDurationMs",
+        "totalPveKills",
+        "totalPveBossKills",
+        "totalPvpKills",
+        "totalHits",
+        "canary",
+        "shadowTotal",
+        "shadowSession",
+    }
+
+    for _, key in ipairs(requiredKeys) do
+        if snapshot[key] == nil then
+            return false
+        end
+    end
+
+    return true
+end
+
+function DC.storage:DoesIntegritySnapshotMatch(snapshot)
+    if not self:IsDecodedIntegritySnapshotValid(snapshot) then
+        return false
+    end
+
+    if snapshot.canary ~= self:GetExpectedIntegrityCanary() then
+        return false
+    end
+
+    if snapshot.shadowTotal ~= self:GetExpectedIntegrityShadowTotal(snapshot) then
+        return false
+    end
+
+    if snapshot.shadowSession ~= self:GetExpectedIntegrityShadowSession(snapshot) then
+        return false
+    end
+
+    return true
+end
+
+function DC.storage:ValidatePersistedIntegrityState()
+    if not DC.integrity:SelfTest() then
+        return false
+    end
+
+    if self.sv.integrityChecksum == nil or self.sv.integrityChecksum == "" then
+        return false
+    end
+
+    if self.sv.integrityChecksumSecondary == nil or self.sv.integrityChecksumSecondary == "" then
+        return false
+    end
+
+    if self.sv.integrityChecksum ~= DC.integrity:Checksum(self:BuildIntegrityPayload()) then
+        return false
+    end
+
+    if self.sv.integrityChecksumSecondary ~= DC.integrity:Checksum(self:BuildIntegritySecondaryPayload()) then
+        return false
+    end
+
+    local snapshot = self:DecodePersistedIntegritySnapshot()
+
+    if not self:DoesIntegritySnapshotMatch(snapshot) then
+        return false
+    end
+
+    return snapshot
+end
+
+function DC.storage:HandleIntegrityFailure()
+    if self.integrityFailureHandled then
+        return false
+    end
+
+    self.integrityFailureHandled = true
+    self:MarkModified()
+    return false
+end
+
+function DC.storage:MaybeRunIntegritySpotCheck(force)
+    if self.integrityFailureHandled then
+        return false
+    end
+
+    local now = GetGameTimeMilliseconds and GetGameTimeMilliseconds() or 0
+
+    if not force and self.lastIntegritySpotCheckAt > 0 and (now - self.lastIntegritySpotCheckAt) < self.integritySpotCheckIntervalMs then
+        return true
+    end
+
+    self.lastIntegritySpotCheckAt = now
+
+    if self:ValidatePersistedIntegrityState() == false then
+        return self:HandleIntegrityFailure()
+    end
+
+    return true
+end
+
 function DC.storage:MarkModified()
     self:ResetAllRuntimeData()
     self.sv.integrityState = DC.integrityStates.MODIFIED
     self.sv.lastIntegrityIssue = GetTimeStamp and GetTimeStamp() or 0
-    self.sv.integritySalt = DC.integrity:GenerateSalt()
+    self.sv.integrityCodecVersion = 2
+    self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
     self:Persist(true)
 end
 
 function DC.storage:ResetTotal(clearModifiedFlag)
     self:ResetAllRuntimeData()
-    self.sv.integritySalt = DC.integrity:GenerateSalt()
+    self.integrityFailureHandled = false
+    self.lastIntegritySpotCheckAt = 0
+    self.sv.integrityCodecVersion = 2
+    self.sv.integrityKeyA, self.sv.integrityKeyB = DC.integrity:GenerateSeedParts()
 
     if clearModifiedFlag then
         self.sv.integrityState = DC.integrityStates.VERIFIED
@@ -541,6 +755,8 @@ function DC.storage:GetSessionReceivedDamage()
 end
 
 function DC.storage:GetDpsSnapshotForMode(mode)
+    self:MaybeRunIntegritySpotCheck(false)
+
     if mode == DC.displayModes.SESSION then
         return {
             playerDamage = self.sessionPlayerDamage or 0,
@@ -576,6 +792,8 @@ function DC.storage:FinalizeCombatDps(playerDamage, groupDamage, combatDurationM
 end
 
 function DC.storage:GetMetricTotalForMode(metricKey, mode)
+    self:MaybeRunIntegritySpotCheck(false)
+
     local stats = self:GetStatsForMode(mode)
 
     if stats[metricKey] ~= nil then
@@ -594,6 +812,8 @@ function DC.storage:IsModified()
 end
 
 function DC.storage:GetIntegrityStatusText()
+    self:MaybeRunIntegritySpotCheck(false)
+
     if self:IsModified() then
         return DC:GetString("statusModified")
     end
@@ -604,7 +824,9 @@ end
 function DC.storage:BuildSessionIntegrityPayload()
     local payload = {
         tostring(self.sv.installId or ""),
-        tostring(self.sv.integritySalt or ""),
+        tostring(self.sv.integrityCodecVersion or 0),
+        tostring(self.sv.integrityKeyA or ""),
+        tostring(self.sv.integrityKeyB or ""),
         tostring((self.sessionStats and self.sessionStats.damage) or 0),
         tostring((self.sessionStats and self.sessionStats.blocked) or 0),
         tostring((self.sessionStats and self.sessionStats.healed) or 0),
@@ -620,6 +842,7 @@ function DC.storage:BuildSessionIntegrityPayload()
 end
 
 function DC.storage:GetSessionIntegrityHash()
+    self:MaybeRunIntegritySpotCheck(false)
     return string.upper(DC.integrity:Checksum(self:BuildSessionIntegrityPayload()))
 end
 
@@ -739,314 +962,89 @@ function DC.storage:Initialize()
     self:ResetAllRuntimeData()
 
     if self.sv.installId == nil or self.sv.installId == "" then
-        self.sv.installId = DC.integrity:GenerateSalt()
+        local installPartA, installPartB = DC.integrity:GenerateSeedParts()
+        self.sv.installId = string.format("%s%s", tostring(installPartA), tostring(installPartB))
     end
 
-    if self.sv.integritySalt == nil or self.sv.integritySalt == "" then
-        self.sv.integritySalt = DC.integrity:GenerateSalt()
-    end
-
-    local expectedChecksum = self.sv.integrityChecksum
-    local damageEncoded = self.sv.totalDamageEncoded
-    local blockedEncoded = self.sv.totalBlockedEncoded
-    local healedEncoded = self.sv.totalHealedEncoded
-    local receivedEncoded = self.sv.totalReceivedEncoded
-    local totalPlayerDamageEncoded = self.sv.totalPlayerDamageEncoded
-    local totalGroupDamageEncoded = self.sv.totalGroupDamageEncoded
-    local totalCombatDurationEncoded = self.sv.totalCombatDurationEncoded
-    local totalActiveCombatDurationEncoded = self.sv.totalActiveCombatDurationEncoded
-    local sessionDamageEncoded = self.sv.sessionDamageEncoded
-    local sessionBlockedEncoded = self.sv.sessionBlockedEncoded
-    local sessionHealedEncoded = self.sv.sessionHealedEncoded
-    local sessionReceivedEncoded = self.sv.sessionReceivedEncoded
-    local sessionPlayerDamageEncoded = self.sv.sessionPlayerDamageEncoded
-    local sessionGroupDamageEncoded = self.sv.sessionGroupDamageEncoded
-    local sessionCombatDurationEncoded = self.sv.sessionCombatDurationEncoded
-    local sessionActiveCombatDurationEncoded = self.sv.sessionActiveCombatDurationEncoded
-    local pveKillsEncoded = self.sv.totalPveKillsEncoded
-    local pveBossKillsEncoded = self.sv.totalPveBossKillsEncoded
-    local pvpKillsEncoded = self.sv.totalPvpKillsEncoded
-    local hitsEncoded = self.sv.totalHitsEncoded
-
-    if expectedChecksum == nil or expectedChecksum == "" or damageEncoded == nil or damageEncoded == "" or hitsEncoded == nil or hitsEncoded == "" then
-        self.sv.integrityState = self.sv.integrityState or DC.integrityStates.VERIFIED
+    if self.sv.integrityCodecVersion ~= 2 then
+        self.sv.integrityState = DC.integrityStates.VERIFIED
+        self.sv.lastIntegrityIssue = 0
         self:ResetTotal(false)
-    elseif blockedEncoded == nil or blockedEncoded == "" or healedEncoded == nil or healedEncoded == "" then
-        local legacyChecksum = DC.integrity:Checksum(self:BuildLegacyIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if legacyChecksum ~= expectedChecksum or decodedDamage == nil or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotals(decodedDamage, 0, 0, 0, 0, 0, 0, decodedHits)
-            self:Persist(true)
-        end
-    elseif receivedEncoded == nil or receivedEncoded == "" then
-        local threeMetricChecksum = DC.integrity:Checksum(self:BuildThreeMetricIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if threeMetricChecksum ~= expectedChecksum or decodedDamage == nil or decodedBlocked == nil or decodedHealed == nil or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotals(decodedDamage, decodedBlocked, decodedHealed, 0, 0, 0, 0, decodedHits)
-            self:Persist(true)
-        end
-    elseif pveKillsEncoded == nil or pveKillsEncoded == "" or pvpKillsEncoded == nil or pvpKillsEncoded == "" then
-        local fourMetricChecksum = DC.integrity:Checksum(self:BuildFourMetricIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if fourMetricChecksum ~= expectedChecksum or decodedDamage == nil or decodedBlocked == nil or decodedHealed == nil or decodedReceived == nil or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotals(decodedDamage, decodedBlocked, decodedHealed, decodedReceived, 0, 0, 0, decodedHits)
-            self:Persist(true)
-        end
-    elseif pveBossKillsEncoded == nil or pveBossKillsEncoded == "" then
-        local killMetricChecksum = DC.integrity:Checksum(self:BuildKillMetricIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedPveKills = DC.integrity:DecodeNumber(pveKillsEncoded, self.sv.integritySalt, "pveKills")
-        local decodedPvpKills = DC.integrity:DecodeNumber(pvpKillsEncoded, self.sv.integritySalt, "pvpKills")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if killMetricChecksum ~= expectedChecksum or decodedDamage == nil or decodedBlocked == nil or decodedHealed == nil or decodedReceived == nil or decodedPveKills == nil or decodedPvpKills == nil or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotals(decodedDamage, decodedBlocked, decodedHealed, decodedReceived, decodedPveKills, 0, decodedPvpKills, decodedHits)
-            self:Persist(true)
-        end
-    elseif sessionDamageEncoded == nil or sessionDamageEncoded == ""
-        or sessionBlockedEncoded == nil or sessionBlockedEncoded == ""
-        or sessionHealedEncoded == nil or sessionHealedEncoded == ""
-        or sessionReceivedEncoded == nil or sessionReceivedEncoded == "" then
-        local preSessionChecksum = DC.integrity:Checksum(self:BuildPreSessionIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedPveKills = DC.integrity:DecodeNumber(pveKillsEncoded, self.sv.integritySalt, "pveKills")
-        local decodedPveBossKills = DC.integrity:DecodeNumber(pveBossKillsEncoded, self.sv.integritySalt, "pveBossKills")
-        local decodedPvpKills = DC.integrity:DecodeNumber(pvpKillsEncoded, self.sv.integritySalt, "pvpKills")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if preSessionChecksum ~= expectedChecksum
-            or decodedDamage == nil
-            or decodedBlocked == nil
-            or decodedHealed == nil
-            or decodedReceived == nil
-            or decodedPveKills == nil
-            or decodedPveBossKills == nil
-            or decodedPvpKills == nil
-            or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotals(decodedDamage, decodedBlocked, decodedHealed, decodedReceived, decodedPveKills, decodedPveBossKills, decodedPvpKills, decodedHits)
-            self:Persist(true)
-        end
-    elseif totalPlayerDamageEncoded == nil or totalPlayerDamageEncoded == ""
-        or totalGroupDamageEncoded == nil or totalGroupDamageEncoded == ""
-        or totalCombatDurationEncoded == nil or totalCombatDurationEncoded == ""
-        or sessionPlayerDamageEncoded == nil or sessionPlayerDamageEncoded == ""
-        or sessionGroupDamageEncoded == nil or sessionGroupDamageEncoded == ""
-        or sessionCombatDurationEncoded == nil or sessionCombatDurationEncoded == "" then
-        local preDpsChecksum = DC.integrity:Checksum(self:BuildPreDpsIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedSessionDamage = DC.integrity:DecodeNumber(sessionDamageEncoded, self.sv.integritySalt, "sessionDamage")
-        local decodedSessionBlocked = DC.integrity:DecodeNumber(sessionBlockedEncoded, self.sv.integritySalt, "sessionBlocked")
-        local decodedSessionHealed = DC.integrity:DecodeNumber(sessionHealedEncoded, self.sv.integritySalt, "sessionHealed")
-        local decodedSessionReceived = DC.integrity:DecodeNumber(sessionReceivedEncoded, self.sv.integritySalt, "sessionReceived")
-        local decodedPveKills = DC.integrity:DecodeNumber(pveKillsEncoded, self.sv.integritySalt, "pveKills")
-        local decodedPveBossKills = DC.integrity:DecodeNumber(pveBossKillsEncoded, self.sv.integritySalt, "pveBossKills")
-        local decodedPvpKills = DC.integrity:DecodeNumber(pvpKillsEncoded, self.sv.integritySalt, "pvpKills")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if preDpsChecksum ~= expectedChecksum
-            or decodedDamage == nil
-            or decodedBlocked == nil
-            or decodedHealed == nil
-            or decodedReceived == nil
-            or decodedSessionDamage == nil
-            or decodedSessionBlocked == nil
-            or decodedSessionHealed == nil
-            or decodedSessionReceived == nil
-            or decodedPveKills == nil
-            or decodedPveBossKills == nil
-            or decodedPvpKills == nil
-            or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotalsAndSession(
-                decodedDamage,
-                decodedBlocked,
-                decodedHealed,
-                decodedReceived,
-                decodedSessionDamage,
-                decodedSessionBlocked,
-                decodedSessionHealed,
-                decodedSessionReceived,
-                decodedPveKills,
-                decodedPveBossKills,
-                decodedPvpKills,
-                decodedHits,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0
-            )
-            self:Persist(true)
-        end
-    elseif totalActiveCombatDurationEncoded == nil or totalActiveCombatDurationEncoded == ""
-        or sessionActiveCombatDurationEncoded == nil or sessionActiveCombatDurationEncoded == "" then
-        local preActiveDpsChecksum = DC.integrity:Checksum(self:BuildPreActiveDpsIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedTotalPlayerDamage = DC.integrity:DecodeNumber(totalPlayerDamageEncoded, self.sv.integritySalt, "totalPlayerDamage")
-        local decodedTotalGroupDamage = DC.integrity:DecodeNumber(totalGroupDamageEncoded, self.sv.integritySalt, "totalGroupDamage")
-        local decodedTotalCombatDuration = DC.integrity:DecodeNumber(totalCombatDurationEncoded, self.sv.integritySalt, "totalCombatDuration")
-        local decodedSessionDamage = DC.integrity:DecodeNumber(sessionDamageEncoded, self.sv.integritySalt, "sessionDamage")
-        local decodedSessionBlocked = DC.integrity:DecodeNumber(sessionBlockedEncoded, self.sv.integritySalt, "sessionBlocked")
-        local decodedSessionHealed = DC.integrity:DecodeNumber(sessionHealedEncoded, self.sv.integritySalt, "sessionHealed")
-        local decodedSessionReceived = DC.integrity:DecodeNumber(sessionReceivedEncoded, self.sv.integritySalt, "sessionReceived")
-        local decodedSessionPlayerDamage = DC.integrity:DecodeNumber(sessionPlayerDamageEncoded, self.sv.integritySalt, "sessionPlayerDamage")
-        local decodedSessionGroupDamage = DC.integrity:DecodeNumber(sessionGroupDamageEncoded, self.sv.integritySalt, "sessionGroupDamage")
-        local decodedSessionCombatDuration = DC.integrity:DecodeNumber(sessionCombatDurationEncoded, self.sv.integritySalt, "sessionCombatDuration")
-        local decodedPveKills = DC.integrity:DecodeNumber(pveKillsEncoded, self.sv.integritySalt, "pveKills")
-        local decodedPveBossKills = DC.integrity:DecodeNumber(pveBossKillsEncoded, self.sv.integritySalt, "pveBossKills")
-        local decodedPvpKills = DC.integrity:DecodeNumber(pvpKillsEncoded, self.sv.integritySalt, "pvpKills")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
-
-        if preActiveDpsChecksum ~= expectedChecksum
-            or decodedDamage == nil
-            or decodedBlocked == nil
-            or decodedHealed == nil
-            or decodedReceived == nil
-            or decodedTotalPlayerDamage == nil
-            or decodedTotalGroupDamage == nil
-            or decodedTotalCombatDuration == nil
-            or decodedSessionDamage == nil
-            or decodedSessionBlocked == nil
-            or decodedSessionHealed == nil
-            or decodedSessionReceived == nil
-            or decodedSessionPlayerDamage == nil
-            or decodedSessionGroupDamage == nil
-            or decodedSessionCombatDuration == nil
-            or decodedPveKills == nil
-            or decodedPveBossKills == nil
-            or decodedPvpKills == nil
-            or decodedHits == nil then
-            self:MarkModified()
-        else
-            self:InitializeDecodedTotalsAndSession(
-                decodedDamage,
-                decodedBlocked,
-                decodedHealed,
-                decodedReceived,
-                decodedSessionDamage,
-                decodedSessionBlocked,
-                decodedSessionHealed,
-                decodedSessionReceived,
-                decodedPveKills,
-                decodedPveBossKills,
-                decodedPvpKills,
-                decodedHits,
-                decodedTotalPlayerDamage,
-                decodedTotalGroupDamage,
-                decodedTotalCombatDuration,
-                decodedTotalCombatDuration,
-                decodedSessionPlayerDamage,
-                decodedSessionGroupDamage,
-                decodedSessionCombatDuration,
-                decodedSessionCombatDuration
-            )
-            self:Persist(true)
-        end
     else
-        local actualChecksum = DC.integrity:Checksum(self:BuildIntegrityPayload())
-        local decodedDamage = DC.integrity:DecodeNumber(damageEncoded, self.sv.integritySalt, "damage")
-        local decodedBlocked = DC.integrity:DecodeNumber(blockedEncoded, self.sv.integritySalt, "blocked")
-        local decodedHealed = DC.integrity:DecodeNumber(healedEncoded, self.sv.integritySalt, "healed")
-        local decodedReceived = DC.integrity:DecodeNumber(receivedEncoded, self.sv.integritySalt, "received")
-        local decodedTotalPlayerDamage = DC.integrity:DecodeNumber(totalPlayerDamageEncoded, self.sv.integritySalt, "totalPlayerDamage")
-        local decodedTotalGroupDamage = DC.integrity:DecodeNumber(totalGroupDamageEncoded, self.sv.integritySalt, "totalGroupDamage")
-        local decodedTotalCombatDuration = DC.integrity:DecodeNumber(totalCombatDurationEncoded, self.sv.integritySalt, "totalCombatDuration")
-        local decodedTotalActiveCombatDuration = DC.integrity:DecodeNumber(totalActiveCombatDurationEncoded, self.sv.integritySalt, "totalActiveCombatDuration")
-        local decodedSessionDamage = DC.integrity:DecodeNumber(sessionDamageEncoded, self.sv.integritySalt, "sessionDamage")
-        local decodedSessionBlocked = DC.integrity:DecodeNumber(sessionBlockedEncoded, self.sv.integritySalt, "sessionBlocked")
-        local decodedSessionHealed = DC.integrity:DecodeNumber(sessionHealedEncoded, self.sv.integritySalt, "sessionHealed")
-        local decodedSessionReceived = DC.integrity:DecodeNumber(sessionReceivedEncoded, self.sv.integritySalt, "sessionReceived")
-        local decodedSessionPlayerDamage = DC.integrity:DecodeNumber(sessionPlayerDamageEncoded, self.sv.integritySalt, "sessionPlayerDamage")
-        local decodedSessionGroupDamage = DC.integrity:DecodeNumber(sessionGroupDamageEncoded, self.sv.integritySalt, "sessionGroupDamage")
-        local decodedSessionCombatDuration = DC.integrity:DecodeNumber(sessionCombatDurationEncoded, self.sv.integritySalt, "sessionCombatDuration")
-        local decodedSessionActiveCombatDuration = DC.integrity:DecodeNumber(sessionActiveCombatDurationEncoded, self.sv.integritySalt, "sessionActiveCombatDuration")
-        local decodedPveKills = DC.integrity:DecodeNumber(pveKillsEncoded, self.sv.integritySalt, "pveKills")
-        local decodedPveBossKills = DC.integrity:DecodeNumber(pveBossKillsEncoded, self.sv.integritySalt, "pveBossKills")
-        local decodedPvpKills = DC.integrity:DecodeNumber(pvpKillsEncoded, self.sv.integritySalt, "pvpKills")
-        local decodedHits = DC.integrity:DecodeNumber(hitsEncoded, self.sv.integritySalt, "hits")
+        local requiredValues = {
+            self.sv.integrityChecksum,
+            self.sv.integrityChecksumSecondary,
+            self.sv.integrityCanaryEncoded,
+            self.sv.integrityShadowTotalEncoded,
+            self.sv.integrityShadowSessionEncoded,
+            self.sv.totalDamageEncoded,
+            self.sv.totalBlockedEncoded,
+            self.sv.totalHealedEncoded,
+            self.sv.totalReceivedEncoded,
+            self.sv.totalPlayerDamageEncoded,
+            self.sv.totalGroupDamageEncoded,
+            self.sv.totalCombatDurationEncoded,
+            self.sv.totalActiveCombatDurationEncoded,
+            self.sv.sessionDamageEncoded,
+            self.sv.sessionBlockedEncoded,
+            self.sv.sessionHealedEncoded,
+            self.sv.sessionReceivedEncoded,
+            self.sv.sessionPlayerDamageEncoded,
+            self.sv.sessionGroupDamageEncoded,
+            self.sv.sessionCombatDurationEncoded,
+            self.sv.sessionActiveCombatDurationEncoded,
+            self.sv.totalPveKillsEncoded,
+            self.sv.totalPveBossKillsEncoded,
+            self.sv.totalPvpKillsEncoded,
+            self.sv.totalHitsEncoded,
+        }
+        local hasAllRequiredValues = true
 
-        if actualChecksum ~= expectedChecksum
-            or decodedDamage == nil
-            or decodedBlocked == nil
-            or decodedHealed == nil
-            or decodedReceived == nil
-            or decodedTotalPlayerDamage == nil
-            or decodedTotalGroupDamage == nil
-            or decodedTotalCombatDuration == nil
-            or decodedTotalActiveCombatDuration == nil
-            or decodedSessionDamage == nil
-            or decodedSessionBlocked == nil
-            or decodedSessionHealed == nil
-            or decodedSessionReceived == nil
-            or decodedSessionPlayerDamage == nil
-            or decodedSessionGroupDamage == nil
-            or decodedSessionCombatDuration == nil
-            or decodedSessionActiveCombatDuration == nil
-            or decodedPveKills == nil
-            or decodedPveBossKills == nil
-            or decodedPvpKills == nil
-            or decodedHits == nil then
-            self:MarkModified()
+        for _, value in ipairs(requiredValues) do
+            if value == nil or value == "" then
+                hasAllRequiredValues = false
+                break
+            end
+        end
+
+        if not hasAllRequiredValues then
+            self.sv.integrityState = DC.integrityStates.VERIFIED
+            self.sv.lastIntegrityIssue = 0
+            self:ResetTotal(false)
         else
-            self:InitializeDecodedTotalsAndSession(
-                decodedDamage,
-                decodedBlocked,
-                decodedHealed,
-                decodedReceived,
-                decodedSessionDamage,
-                decodedSessionBlocked,
-                decodedSessionHealed,
-                decodedSessionReceived,
-                decodedPveKills,
-                decodedPveBossKills,
-                decodedPvpKills,
-                decodedHits,
-                decodedTotalPlayerDamage,
-                decodedTotalGroupDamage,
-                decodedTotalCombatDuration,
-                decodedTotalActiveCombatDuration,
-                decodedSessionPlayerDamage,
-                decodedSessionGroupDamage,
-                decodedSessionCombatDuration,
-                decodedSessionActiveCombatDuration
-            )
+            self:EnsureIntegritySeed()
+            local snapshot = self:ValidatePersistedIntegrityState()
+
+            if type(snapshot) ~= "table" then
+                self:HandleIntegrityFailure()
+            else
+                local validatedSnapshot = snapshot
+                self.integrityFailureHandled = false
+                self.lastIntegritySpotCheckAt = 0
+                self:InitializeDecodedTotalsAndSession(
+                    validatedSnapshot.totalDamage,
+                    validatedSnapshot.totalBlocked,
+                    validatedSnapshot.totalHealed,
+                    validatedSnapshot.totalReceived,
+                    validatedSnapshot.sessionDamage,
+                    validatedSnapshot.sessionBlocked,
+                    validatedSnapshot.sessionHealed,
+                    validatedSnapshot.sessionReceived,
+                    validatedSnapshot.totalPveKills,
+                    validatedSnapshot.totalPveBossKills,
+                    validatedSnapshot.totalPvpKills,
+                    validatedSnapshot.totalHits,
+                    validatedSnapshot.totalPlayerDamage,
+                    validatedSnapshot.totalGroupDamage,
+                    validatedSnapshot.totalCombatDurationMs,
+                    validatedSnapshot.totalActiveCombatDurationMs,
+                    validatedSnapshot.sessionPlayerDamage,
+                    validatedSnapshot.sessionGroupDamage,
+                    validatedSnapshot.sessionCombatDurationMs,
+                    validatedSnapshot.sessionActiveCombatDurationMs
+                )
+                self:RotateIntegritySeed(true)
+            end
         end
     end
 
