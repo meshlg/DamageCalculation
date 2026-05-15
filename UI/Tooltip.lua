@@ -174,8 +174,8 @@ function DC.tooltip:CreateControl()
 
     control.backdrop = WINDOW_MANAGER:CreateControl(nil, control, CT_BACKDROP)
     control.backdrop:SetAnchorFill(control)
-    control.backdrop:SetCenterColor(0.02, 0.02, 0.02, 0.88)
-    control.backdrop:SetEdgeColor(0.12, 0.12, 0.12, 0.95)
+    control.backdrop:SetCenterColor(0.018, 0.017, 0.015, 0.90)
+    control.backdrop:SetEdgeColor(0.32, 0.25, 0.15, 0.72)
     control.backdrop:SetEdgeTexture("", 2, 1, 1)
     control.backdrop:SetInsets(0, 0, -1, -1)
 

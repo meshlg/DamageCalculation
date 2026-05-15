@@ -165,7 +165,7 @@ function DC.settings:Initialize()
         {
             type = "header",
             name = function()
-                return DC:GetString("menuHeaderDisplay")
+                return DC:GetString("menuHeaderCore")
             end,
             width = "full",
         },
@@ -232,6 +232,13 @@ function DC.settings:Initialize()
                 DC:RefreshAll()
             end,
             default = defaults.dpsMode,
+            width = "full",
+        },
+        {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderDpsGraph")
+            end,
             width = "full",
         },
         {
@@ -342,6 +349,13 @@ function DC.settings:Initialize()
             width = "full",
         },
         {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderRows")
+            end,
+            width = "full",
+        },
+        {
             type = "checkbox",
             name = function()
                 return DC:GetString("menuShowLabelName")
@@ -430,6 +444,13 @@ function DC.settings:Initialize()
             end,
             default = defaults.showHealedMetric,
             width = "half",
+        },
+        {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderLayout")
+            end,
+            width = "full",
         },
         {
             type = "dropdown",
@@ -583,6 +604,13 @@ function DC.settings:Initialize()
             width = "half",
         },
         {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderFormat")
+            end,
+            width = "full",
+        },
+        {
             type = "dropdown",
             name = function()
                 return DC:GetString("menuFormatName")
@@ -625,7 +653,7 @@ function DC.settings:Initialize()
         {
             type = "header",
             name = function()
-                return DC:GetString("menuHeaderFonts")
+                return DC:GetString("menuHeaderTypography")
             end,
             width = "full",
         },
@@ -730,6 +758,13 @@ function DC.settings:Initialize()
             end,
             default = defaults.valueFontSize,
             width = "half",
+        },
+        {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderColors")
+            end,
+            width = "full",
         },
         {
             type = "colorpicker",
@@ -861,7 +896,7 @@ function DC.settings:Initialize()
         {
             type = "header",
             name = function()
-                return DC:GetString("menuHeaderEffects")
+                return DC:GetString("menuHeaderMotion")
             end,
             width = "full",
         },
@@ -907,6 +942,13 @@ function DC.settings:Initialize()
             end,
         },
         {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderFeedback")
+            end,
+            width = "full",
+        },
+        {
             type = "checkbox",
             name = function()
                 return DC:GetString("menuShowHitPopupName")
@@ -921,6 +963,13 @@ function DC.settings:Initialize()
                 DC.storage:SetSetting("showHitPopup", value)
             end,
             default = defaults.showHitPopup,
+            width = "full",
+        },
+        {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderSounds")
+            end,
             width = "full",
         },
         {
@@ -1070,6 +1119,13 @@ function DC.settings:Initialize()
             disabled = function()
                 return not DC.storage:GetSettings().enableHitSounds
             end,
+        },
+        {
+            type = "header",
+            name = function()
+                return DC:GetString("menuHeaderPopups")
+            end,
+            width = "full",
         },
         {
             type = "dropdown",

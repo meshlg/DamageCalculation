@@ -208,7 +208,7 @@ function DC.dpsGraph:AttachMiniSparkline(row)
     row.sparkline:SetMouseEnabled(false)
     row.sparkline.backdrop = WINDOW_MANAGER:CreateControl(nil, row.sparkline, CT_BACKDROP)
     row.sparkline.backdrop:SetAnchorFill(row.sparkline)
-    row.sparkline.backdrop:SetCenterColor(0.04, 0.04, 0.04, 0.12)
+    row.sparkline.backdrop:SetCenterColor(0.02, 0.018, 0.015, 0.18)
     row.sparkline.backdrop:SetEdgeColor(0, 0, 0, 0)
     row.sparkline.columns = self:CreateColumns(row.sparkline, self:GetMiniPointCount(), true)
     row.sparkline.innerPaddingX = self.miniPaddingX
@@ -225,8 +225,8 @@ function DC.dpsGraph:CreateControl()
 
     control.backdrop = WINDOW_MANAGER:CreateControl(nil, control, CT_BACKDROP)
     control.backdrop:SetAnchorFill(control)
-    control.backdrop:SetCenterColor(0.02, 0.02, 0.02, 0.92)
-    control.backdrop:SetEdgeColor(0.18, 0.18, 0.18, 0.95)
+    control.backdrop:SetCenterColor(0.018, 0.017, 0.015, 0.92)
+    control.backdrop:SetEdgeColor(0.34, 0.27, 0.16, 0.78)
     control.backdrop:SetEdgeTexture("", 2, 1, 1)
     control.backdrop:SetInsets(0, 0, -1, -1)
 
@@ -251,12 +251,12 @@ function DC.dpsGraph:CreateControl()
 
     control.graphCanvas.backdrop = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_BACKDROP)
     control.graphCanvas.backdrop:SetAnchorFill(control.graphCanvas)
-    control.graphCanvas.backdrop:SetCenterColor(0.05, 0.05, 0.05, 0.28)
+    control.graphCanvas.backdrop:SetCenterColor(0.015, 0.014, 0.012, 0.36)
     control.graphCanvas.backdrop:SetEdgeColor(0, 0, 0, 0)
 
     control.graphCanvas.midline = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_BACKDROP)
     control.graphCanvas.midline:SetMouseEnabled(false)
-    control.graphCanvas.midline:SetCenterColor(1, 1, 1, 0.07)
+    control.graphCanvas.midline:SetCenterColor(0.88, 0.78, 0.55, 0.08)
     control.graphCanvas.midline:SetEdgeColor(0, 0, 0, 0)
 
     control.graphCanvas.innerPaddingX = self.graphPaddingX
@@ -265,7 +265,7 @@ function DC.dpsGraph:CreateControl()
     control.graphCanvas.peakMarker = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_BACKDROP)
     control.graphCanvas.peakMarker:SetMouseEnabled(false)
     control.graphCanvas.peakMarker:SetEdgeColor(0, 0, 0, 0)
-    control.graphCanvas.peakMarker:SetCenterColor(1.0, 0.95, 0.65, 0.95)
+    control.graphCanvas.peakMarker:SetCenterColor(0.96, 0.78, 0.36, 0.94)
     control.graphCanvas.peakMarker:SetHidden(true)
 
     control.graphCanvas.peakLabel = WINDOW_MANAGER:CreateControl(nil, control.graphCanvas, CT_LABEL)
@@ -832,9 +832,9 @@ function DC.dpsGraph:DrawBars(container, columns, dataset)
             local capRed = math.min(1.0, valueColorR + 0.10)
             local capGreen = math.min(1.0, valueColorG + 0.10)
             local capBlue = math.min(1.0, valueColorB + 0.10)
-            local warmColor = { 0.95, 0.36, 0.28 }
-            local highColor = { 0.36, 0.90, 0.46 }
-            local peakColor = { 0.30, 0.98, 0.52 }
+            local warmColor = { 0.78, 0.34, 0.24 }
+            local highColor = { 0.62, 0.76, 0.42 }
+            local peakColor = { 0.92, 0.74, 0.36 }
             local baseColor = { valueColorR, valueColorG, valueColorB }
             local isPeakBar = peakValue > 0 and (barIndex == peakIndex or primaryLast >= nearPeakThreshold)
             local isLowBar = spreadValue > 0 and primaryLast <= slumpThreshold

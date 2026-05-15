@@ -462,9 +462,9 @@ function DC.hud:CreateControl()
 
     control.backdrop = WINDOW_MANAGER:CreateControl(nil, control, CT_BACKDROP)
     control.backdrop:SetAnchorFill(control)
-    control.backdrop:SetCenterColor(0.02, 0.02, 0.02, 0.45)
-    control.backdrop:SetEdgeColor(0.8, 0.62, 0.18, 0.75)
-    control.backdrop:SetEdgeTexture("", 8, 1, 1.5)
+    control.backdrop:SetCenterColor(0.015, 0.014, 0.012, 0.38)
+    control.backdrop:SetEdgeColor(0.62, 0.48, 0.20, 0.58)
+    control.backdrop:SetEdgeTexture("", 8, 1, 1.25)
     control.backdrop:SetInsets(0, 0, -1, -1)
 
     control.metricsContainer = WINDOW_MANAGER:CreateControl(nil, control, CT_CONTROL)
@@ -658,16 +658,16 @@ function DC.hud:ApplyLayout()
     self.control:SetMouseEnabled(settings.showHud == true and not settings.lockWindow)
 
     if settings.showBackground then
-        self.control.backdrop:SetCenterColor(0.02, 0.02, 0.02, 0.45)
+        self.control.backdrop:SetCenterColor(0.015, 0.014, 0.012, 0.38)
     else
         self.control.backdrop:SetCenterColor(0, 0, 0, 0)
     end
 
     if settings.showBorder then
         if DC.storage:IsModified() then
-            self.control.backdrop:SetEdgeColor(0.95, 0.25, 0.25, 0.85)
+            self.control.backdrop:SetEdgeColor(0.86, 0.24, 0.20, 0.78)
         else
-            self.control.backdrop:SetEdgeColor(0.8, 0.62, 0.18, 0.75)
+            self.control.backdrop:SetEdgeColor(0.62, 0.48, 0.20, 0.58)
         end
     else
         self.control.backdrop:SetEdgeColor(0, 0, 0, 0)
@@ -1182,10 +1182,10 @@ function DC.hud:Refresh()
 
     if DC.storage:IsModified() then
         self.control.statusLabel:SetText(DC:GetString("hudIntegrityWarning"))
-        self.control.statusLabel:SetColor(1.0, 0.35, 0.35, 1.0)
+        self.control.statusLabel:SetColor(0.95, 0.40, 0.34, 0.95)
     else
         self.control.statusLabel:SetText(DC:GetString("hudIntegrityLabel", integrityState))
-        self.control.statusLabel:SetColor(0.56, 0.92, 0.65, 1.0)
+        self.control.statusLabel:SetColor(0.62, 0.78, 0.56, 0.88)
     end
 
     if not settings.animateCounter then
